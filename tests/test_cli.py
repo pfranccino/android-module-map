@@ -97,6 +97,19 @@ def test_whole_project(project):
     assert "[:app](../../app/docs/architecture/app.md)" in index
 
 
+def test_no_timestamp_regenerates_without_a_diff(tmp_path):
+    def generate(name):
+        ok(run(MAP_SCRIPT, FIXTURES / "feature" / "login", "--no-codegraph", "--no-timestamp",
+               "-o", tmp_path / f"{name}.json"))
+        ok(run(DIAGRAM_SCRIPT, tmp_path / f"{name}.json", "-o", tmp_path / f"{name}.md"))
+        return [(tmp_path / f"{name}.{ext}").read_text(encoding="utf-8") for ext in ("json", "md")]
+
+    first, second = generate("first"), generate("second")
+    assert first == second
+    assert "generated_at" not in first[0]
+    assert "a partir del mapa. " in first[1]
+
+
 def test_whole_project_resolves_the_version_catalog(project):
     ok(run(MAP_SCRIPT, project, "--no-codegraph"))
     data = json.loads((project / "core" / "network" / "docs" / "architecture" / "core-network.module-map.json")
