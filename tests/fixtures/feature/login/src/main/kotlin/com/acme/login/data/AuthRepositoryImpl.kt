@@ -38,4 +38,5 @@ class SessionStore @javax.inject.Inject constructor() {
     private var current: Session? = null
     fun save(session: Session) { current = session }
     fun clear() { current = null }
+    fun sealed(crypto: LegacyCrypto): String = crypto.seal(current.toString())
 }

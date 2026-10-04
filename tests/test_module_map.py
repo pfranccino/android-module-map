@@ -1,319 +1,288 @@
-"""Tests for module_map.py and module_diagrams.py.
-
-Runs against:
-  - Synthetic Kotlin fixtures in tests/fixtures/ (module_map.py, AST-only)
-  - Pre-built example JSON maps in examples/ (module_diagrams.py)
-"""
-import json
-import os
+"""module_map.py in process: helpers, Gradle and catalog reading, and the AST map of the fixture."""
+import string
 import subprocess
 import sys
-import tempfile
-from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-SCRIPTS = REPO / "scripts"
-MAP_SCRIPT = SCRIPTS / "module_map.py"
-DIAGRAM_SCRIPT = SCRIPTS / "module_diagrams.py"
-FIXTURES = REPO / "tests" / "fixtures"
-EXAMPLES = REPO / "examples"
-PYTHON = sys.executable
+import pytest
 
-passed = 0
-failed = 0
+import module_map
+from conftest import FIXTURES, REPO
+
+LOGIN_DIR = FIXTURES / "feature" / "login"
 
 
-def run(script, *args, expect_ok=True):
-    result = subprocess.run(
-        [PYTHON, str(script), *args],
-        capture_output=True, text=True, timeout=120,
-    )
-    if expect_ok and result.returncode != 0:
-        raise RuntimeError(f"{script.name} failed (rc={result.returncode}):\n{result.stderr}\n{result.stdout}")
+def placeholders(text):
+    return {name for _, name, _, _ in string.Formatter().parse(text) if name}
+
+
+def keys(tree, prefix=""):
+    found = set()
+    for key, value in tree.items():
+        found.add(prefix + key)
+        if isinstance(value, dict):
+            found |= keys(value, prefix + key + ".")
+    return found
+
+
+@pytest.fixture(scope="module")
+def login_map():
+    catalog, _ = module_map.read_version_catalog(FIXTURES, "es")
+    _, result, _ = module_map.map_module(LOGIN_DIR, FIXTURES, False, {"status": "skipped"}, catalog=catalog)
     return result
 
 
-def check(name, condition, detail=""):
-    global passed, failed
-    if condition:
-        passed += 1
-        print(f"  PASS  {name}")
-    else:
-        failed += 1
-        print(f"  FAIL  {name}  {detail}")
+@pytest.fixture(scope="module")
+def nodes(login_map):
+    return {n["id"]: n for n in login_map["nodes"]}
 
 
-# ─── module_map.py against synthetic fixtures ────────────────────────────
-
-def test_module_map():
-    print("\n=== module_map.py (AST-only, synthetic fixtures) ===\n")
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "map.json"
-        run(MAP_SCRIPT, str(FIXTURES / "feature" / "login"), "--no-codegraph", "-o", str(out))
-
-        check("output file created", out.is_file())
-        data = json.loads(out.read_text(encoding="utf-8"))
-
-        check("schema is module-map/1", data.get("schema") == "module-map/1")
-        check("has generated_at", "generated_at" in data)
-        check("has legend", "legend" in data)
-
-        # Project
-        project = data.get("project", {})
-        check("project name is TestProject", project.get("name") == "TestProject")
-        check("project includes :feature:login", ":feature:login" in project.get("modules", []))
-
-        # Module
-        module = data.get("module", {})
-        check("module path is :feature:login", module.get("path") == ":feature:login")
-        check("module namespace", module.get("namespace") == "com.acme.login")
-        check("module type is android-library", module.get("type") == "android-library")
-
-        # Plugins
-        plugins = module.get("plugins", [])
-        check("hilt plugin detected", any("hilt" in p for p in plugins))
-
-        # Dependencies
-        deps = module.get("dependencies", {})
-        module_deps = [d["path"] for d in deps.get("modules", [])]
-        check("depends on :core:network", ":core:network" in module_deps)
-        check("depends on :core:model", ":core:model" in module_deps)
-        lib_notations = [d["notation"] for d in deps.get("libraries", [])]
-        check("retrofit library detected", any("retrofit" in n for n in lib_notations))
-
-        # Manifest
-        manifest = module.get("manifest", {})
-        check("INTERNET permission", "android.permission.INTERNET" in manifest.get("permissions", []))
-        components = manifest.get("components", [])
-        check("LoginActivity in manifest", any("LoginActivity" in c.get("class", "") for c in components))
-        exported = [c for c in components if "LoginActivity" in c.get("class", "")]
-        check("LoginActivity exported=true", exported and exported[0].get("exported") is True)
-
-        # Nodes
-        nodes = {n["id"]: n for n in data.get("nodes", [])}
-        check("has nodes", len(nodes) > 0, f"got {len(nodes)}")
-
-        expected_nodes = [
-            ("com.acme.login.ui.LoginViewModel", "class", "viewmodel"),
-            ("com.acme.login.domain.LoginUseCase", "class", "usecase"),
-            ("com.acme.login.domain.AuthRepository", "interface", "repository"),
-            ("com.acme.login.data.AuthRepositoryImpl", "class", "repository"),
-            ("com.acme.login.data.AuthApi", "interface", "api_service"),
-            ("com.acme.login.di.LoginModule", "class", "di_module"),
-            ("com.acme.login.data.SessionStore", "class", None),
-            ("com.acme.login.ui.LoginActivity", "class", "android_entry"),
-        ]
-        for node_id, kind, role in expected_nodes:
-            node = nodes.get(node_id)
-            check(f"node {node_id.rsplit('.', 1)[-1]} exists", node is not None)
-            if node:
-                check(f"  kind={kind}", node["kind"] == kind, f"got {node['kind']}")
-                if role:
-                    check(f"  role={role}", node.get("role") == role, f"got {node.get('role')}")
-
-        # Composable functions
-        composables = [n for n in nodes.values() if n.get("role") == "composable"]
-        composable_names = {n["name"] for n in composables}
-        check("LoginScreen is composable", "LoginScreen" in composable_names)
-        check("LoginForm is composable", "LoginForm" in composable_names)
-
-        # Sealed interface and subtypes
-        check("LoginUiState exists", "com.acme.login.ui.LoginUiState" in nodes)
-        subtypes = [n for n in nodes.values() if n.get("parent") == "com.acme.login.ui.LoginUiState"]
-        subtype_names = {n["name"] for n in subtypes}
-        check("LoginUiState has 4 subtypes", len(subtypes) == 4, f"got {len(subtypes)}: {subtype_names}")
-
-        # KDoc
-        vm = nodes.get("com.acme.login.ui.LoginViewModel", {})
-        check("ViewModel has KDoc", vm.get("doc") is not None and "flujo" in vm.get("doc", ""))
-        submit = [f for f in vm.get("functions", []) if f["name"] == "submit"]
-        check("submit() has KDoc", submit and submit[0].get("doc") is not None)
-
-        # Constructor injection
-        check("ViewModel constructor has login param",
-              any(p["name"] == "login" for p in vm.get("constructor", [])))
-        check("ViewModel @Inject constructor",
-              any("Inject" in a for a in vm.get("constructor_annotations", [])))
-
-        # Edges
-        edges = data.get("edges", [])
-        check("has edges", len(edges) > 0, f"got {len(edges)}")
-
-        edge_set = {(e["from"], e["to"], e["kind"]) for e in edges}
-
-        check("AuthRepositoryImpl implements AuthRepository",
-              ("com.acme.login.data.AuthRepositoryImpl", "com.acme.login.domain.AuthRepository", "implements") in edge_set)
-        check("LoginViewModel depends_on LoginUseCase",
-              ("com.acme.login.ui.LoginViewModel", "com.acme.login.domain.LoginUseCase", "depends_on") in edge_set)
-        check("LoginUseCase depends_on AuthRepository",
-              ("com.acme.login.domain.LoginUseCase", "com.acme.login.domain.AuthRepository", "depends_on") in edge_set)
-        check("LoginModule provides AuthRepository",
-              ("com.acme.login.di.LoginModule", "com.acme.login.domain.AuthRepository", "provides") in edge_set)
-        check("LoginModule provides AuthApi",
-              ("com.acme.login.di.LoginModule", "com.acme.login.data.AuthApi", "provides") in edge_set)
-        check("LoginViewModel extends ViewModel",
-              any(e[0] == "com.acme.login.ui.LoginViewModel" and e[2] == "extends"
-                  and "ViewModel" in e[1] for e in edge_set))
-        check("LoginActivity extends ComponentActivity",
-              any(e[0] == "com.acme.login.ui.LoginActivity" and e[2] == "extends"
-                  and "ComponentActivity" in e[1] for e in edge_set))
-
-        # DI detail
-        di_edges = [e for e in edges if e["kind"] == "depends_on"
-                    and any(d.get("di") for d in e.get("details", []))]
-        check("DI edges have di=true", len(di_edges) >= 3, f"got {len(di_edges)}")
-
-        # External nodes
-        externals = {n["id"]: n for n in data.get("external_nodes", [])}
-        check("has external nodes", len(externals) > 0)
-
-        # Sources
-        sources = data.get("sources", {})
-        check("AST source recorded", sources.get("ast", {}).get("parser") == "tree-sitter-kotlin")
-        check("codegraph skipped", sources.get("codegraph", {}).get("status") == "skipped")
-
-        return data
+@pytest.fixture(scope="module")
+def edges(login_map):
+    return {(e["from"], e["to"], e["kind"]) for e in login_map["edges"]}
 
 
-# ─── module_diagrams.py against example maps ─────────────────────────────
+# ---------- importing ----------
 
-def test_module_diagrams_single():
-    print("\n=== module_diagrams.py (single module, example map) ===\n")
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "output.md"
-        run(DIAGRAM_SCRIPT, str(EXAMPLES / "feature-login.module-map.json"), "-o", str(out))
-
-        check("output file created", out.is_file())
-        text = out.read_text(encoding="utf-8")
-
-        check("has title", "# :feature:login: arquitectura" in text)
-        check("has layer diagram", "## Arquitectura por capas" in text)
-        check("has mermaid block", "```mermaid" in text)
-        check("has graph TD", "graph TD" in text)
-        check("has flows section", "## Flujos desde los ViewModels" in text)
-        check("has sequence section", "## Secuencia" in text)
-        check("has module deps section", "## Dependencias entre módulos" in text)
-        check("has DI section", "## Inyección de dependencias" in text)
-        check("has classes table", "## Clases" in text)
-        check("has violations section", "## Violaciones de capas" in text)
-        check("has entry points", "## Puntos de entrada" in text)
-        check("has external deps", "## Dependencias externas" in text)
-        check("has review section", "## Aristas a revisar" in text)
-
-        check("LoginViewModel in diagram", "LoginViewModel" in text)
-        check("AuthRepository in diagram", "AuthRepository" in text)
-        check("LoginUseCase in diagram", "LoginUseCase" in text)
-
-        check("no violations detected", "No se encontraron violaciones" in text)
-
-        check("LoginActivity in manifest table", "LoginActivity" in text)
-        check("sequenceDiagram present", "sequenceDiagram" in text)
+def test_import_needs_neither_tree_sitter_nor_network():
+    probe = ("import sys; sys.path.insert(0, sys.argv[1]); import module_map; "
+             "assert module_map.PARSER is None; assert 'tree_sitter' not in sys.modules")
+    subprocess.run([sys.executable, "-c", probe, str(REPO / "scripts")], check=True)
 
 
-def test_module_diagrams_only():
-    print("\n=== module_diagrams.py (--only classes) ===\n")
-    with tempfile.TemporaryDirectory() as tmp:
-        out_dir = Path(tmp)
-        run(DIAGRAM_SCRIPT, str(EXAMPLES / "feature-login.module-map.json"),
-            "--only", "classes", "-o", str(out_dir / "partial.md"))
-
-        out = out_dir / "partial.md"
-        check("partial output created", out.is_file())
-        text = out.read_text(encoding="utf-8")
-
-        check("has classes section", "## Clases" in text)
-        check("no layer diagram in partial", "## Arquitectura por capas" not in text)
-        check("no flows in partial", "## Flujos desde los ViewModels" not in text)
+def test_messages_have_the_same_keys_and_placeholders_in_every_language():
+    es, en = module_map.MESSAGES["es"], module_map.MESSAGES["en"]
+    assert es.keys() == en.keys()
+    for key in es:
+        assert placeholders(es[key]) == placeholders(en[key]), key
 
 
-def test_module_diagrams_sections_list():
-    print("\n=== module_diagrams.py (--sections) ===\n")
-    result = run(DIAGRAM_SCRIPT, "--sections")
-    output = result.stdout
-    for key in ("layers", "flows", "sequence", "modules", "hilt", "classes", "violations", "entries", "external", "review"):
-        check(f"section '{key}' listed", key in output)
+def test_legend_has_the_same_keys_in_every_language():
+    assert keys(module_map.LEGEND["es"]) == keys(module_map.LEGEND["en"])
 
 
-def test_module_diagrams_multi():
-    print("\n=== module_diagrams.py (multiple modules from examples/) ===\n")
-    with tempfile.TemporaryDirectory() as tmp:
-        out_dir = Path(tmp)
-        run(DIAGRAM_SCRIPT, str(EXAMPLES), "-o", str(out_dir))
+# ---------- helpers ----------
 
-        files = list(out_dir.glob("*.md"))
-        check("multiple output files", len(files) >= 3, f"got {len(files)}: {[f.name for f in files]}")
-        check("index.md created", (out_dir / "index.md").is_file())
-
-        index = (out_dir / "index.md").read_text(encoding="utf-8")
-        check("index has module graph", "graph LR" in index)
-        check("index has module table", ":feature:login" in index or "feature-login" in index)
+@pytest.mark.parametrize("a, b, expected", [
+    ("com.a.B", "com.a.B", True),
+    ("com.a.B", "com.a.B.inner", True),
+    ("com.a.B.inner", "com.a.B", True),
+    ("com.a.B", "com.a.Bc", False),
+])
+def test_related(a, b, expected):
+    assert module_map.related(a, b) is expected
 
 
-# ─── module_map.py then module_diagrams.py end-to-end ─────────────────────
-
-def test_end_to_end():
-    print("\n=== End-to-end: module_map.py -> module_diagrams.py ===\n")
-    with tempfile.TemporaryDirectory() as tmp:
-        map_out = Path(tmp) / "map.json"
-        run(MAP_SCRIPT, str(FIXTURES / "feature" / "login"), "--no-codegraph", "-o", str(map_out))
-        check("map JSON created", map_out.is_file())
-
-        doc_out = Path(tmp) / "output.md"
-        run(DIAGRAM_SCRIPT, str(map_out), "-o", str(doc_out))
-        check("diagram doc created", doc_out.is_file())
-
-        text = doc_out.read_text(encoding="utf-8")
-        check("e2e: has title", ":feature:login: arquitectura" in text)
-        check("e2e: has mermaid", "```mermaid" in text)
-        check("e2e: LoginViewModel in output", "LoginViewModel" in text)
-        check("e2e: has classes table", "## Clases" in text)
-        check("e2e: has violations section", "## Violaciones de capas" in text)
-
-        mermaid_count = text.count("```mermaid")
-        check("e2e: multiple mermaid diagrams", mermaid_count >= 3, f"got {mermaid_count}")
+@pytest.mark.parametrize("text, expected", [
+    ("Foo", "Foo"), ("Foo<Bar>?", "Foo"), ("com.a.Foo", "com.a.Foo"), ("() -> Unit", None), (None, None),
+])
+def test_nominal(text, expected):
+    assert module_map.nominal(text) == expected
 
 
-# ─── edge cases ───────────────────────────────────────────────────────────
-
-def test_no_kotlin_files():
-    print("\n=== Edge case: no .kt files ===\n")
-    with tempfile.TemporaryDirectory() as tmp:
-        empty_dir = Path(tmp) / "empty_module"
-        empty_dir.mkdir()
-        result = run(MAP_SCRIPT, str(empty_dir), "--no-codegraph", expect_ok=False)
-        check("exits with error for empty dir", result.returncode != 0)
-        check("error message mentions .kt", ".kt" in result.stderr or ".kt" in result.stdout)
+def test_ann_names():
+    assert module_map.ann_names(['field:Inject', 'POST("x")', "dagger.Provides"]) == {"Inject", "POST", "Provides"}
 
 
-def test_no_maps():
-    print("\n=== Edge case: no maps for diagrams ===\n")
-    with tempfile.TemporaryDirectory() as tmp:
-        result = run(DIAGRAM_SCRIPT, str(tmp), expect_ok=False)
-        check("exits with error for no maps", result.returncode != 0)
+@pytest.mark.parametrize("path, expected", [
+    ("feature/src/test/kotlin/A.kt", True),
+    ("feature/src/androidTest/kotlin/A.kt", True),
+    ("feature/src/testDebug/kotlin/A.kt", True),
+    ("feature/src/main/kotlin/A.kt", False),
+    ("feature/test/src/main/A.kt", False),
+])
+def test_in_test_source_set(path, expected):
+    assert module_map.in_test_source_set(path) is expected
 
 
-def test_invalid_section():
-    print("\n=== Edge case: invalid --only section ===\n")
-    result = run(DIAGRAM_SCRIPT, str(EXAMPLES / "feature-login.module-map.json"),
-                 "--only", "nonexistent", expect_ok=False)
-    check("exits with error for bad section", result.returncode != 0)
-    check("mentions unknown section", "desconocida" in result.stderr or "desconocida" in result.stdout)
+def test_compact_drops_empty_values_but_keeps_false_and_zero():
+    assert module_map.compact({"a": None, "b": [], "c": {}, "d": False, "e": 0, "f": [{"g": None}]}) == \
+        {"d": False, "e": 0, "f": [{}]}
 
 
-# ─── run ──────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("node, role", [
+    ({"name": "LoginActivity", "annotations": ["AndroidEntryPoint"], "supertypes": ["ComponentActivity"]},
+     "android_entry"),
+    ({"name": "Home", "supertypes": ["ViewModel"]}, "viewmodel"),
+    ({"name": "Api", "functions": [{"annotations": ['GET("users")']}]}, "api_service"),
+    ({"name": "UserRepositoryImpl"}, "repository"),
+    ({"name": "LoadUserUseCase"}, "usecase"),
+    ({"name": "Helper"}, None),
+])
+def test_role_of(node, role):
+    assert module_map.role_of(node) == role
 
-if __name__ == "__main__":
-    test_module_map()
-    test_module_diagrams_single()
-    test_module_diagrams_only()
-    test_module_diagrams_sections_list()
-    test_module_diagrams_multi()
-    test_end_to_end()
-    test_no_kotlin_files()
-    test_no_maps()
-    test_invalid_section()
 
-    print(f"\n{'=' * 50}")
-    print(f"  {passed} passed, {failed} failed")
-    print(f"{'=' * 50}")
-    sys.exit(1 if failed else 0)
+@pytest.mark.parametrize("imports, layer", [
+    ({"Retrofit": "retrofit2.Retrofit", "Call": "okhttp3.Call"}, "Data"),
+    ({"Composable": "androidx.compose.runtime.Composable"}, "Presentation"),
+    ({"Retrofit": "retrofit2.Retrofit", "Composable": "androidx.compose.runtime.Composable"}, None),
+    ({"List": "kotlin.collections.List"}, None),
+])
+def test_layer_from_imports(imports, layer):
+    assert module_map.layer_from_imports(imports) == layer
+
+
+# ---------- Gradle, version catalog, Manifest ----------
+
+def test_version_catalog():
+    catalog, warning = module_map.read_version_catalog(FIXTURES, "es")
+    assert warning is None
+    assert catalog["libraries"] == {
+        "retrofit": "com.squareup.retrofit2:retrofit:2.11.0",
+        "okhttp": "com.squareup.okhttp3:okhttp:4.12.0",
+        "androidx.lifecycle.viewmodel": "androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7",
+        "compose.bom": "androidx.compose:compose-bom:2024.10.00",
+        "compose.ui": "androidx.compose.ui:ui",
+    }
+    assert catalog["bundles"] == {"network": ["com.squareup.retrofit2:retrofit:2.11.0",
+                                              "com.squareup.okhttp3:okhttp:4.12.0"]}
+    assert catalog["plugins"] == {"android.library": "com.android.library",
+                                  "kotlin.android": "org.jetbrains.kotlin.android"}
+
+
+def test_version_catalog_absent(tmp_path):
+    assert module_map.read_version_catalog(tmp_path, "es") == (None, None)
+
+
+def test_version_catalog_invalid(tmp_path):
+    (tmp_path / "gradle").mkdir()
+    (tmp_path / "gradle" / "libs.versions.toml").write_text("[libraries\n", encoding="utf-8")
+    catalog, warning = module_map.read_version_catalog(tmp_path, "en")
+    assert catalog is None
+    assert "gradle/libs.versions.toml is not valid TOML" in warning
+
+
+def test_read_gradle_resolves_catalog_notations():
+    catalog, _ = module_map.read_version_catalog(FIXTURES, "es")
+    gradle = module_map.read_gradle(LOGIN_DIR, catalog)
+    assert gradle["type"] == "android-library"
+    assert gradle["namespace"] == "com.acme.login"
+    assert {(d["path"], d["configuration"]) for d in gradle["dependencies"]["modules"]} == \
+        {(":core:network", "implementation"), (":core:model", "api")}
+    resolved = {d["notation"]: d.get("resolved") for d in gradle["dependencies"]["libraries"]}
+    assert resolved == {
+        "com.squareup.retrofit2:retrofit:2.11.0": None,
+        "libs.androidx.lifecycle.viewmodel": "androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7",
+        "platform(libs.compose.bom)": "androidx.compose:compose-bom:2024.10.00",
+        "libs.compose.ui": "androidx.compose.ui:ui",
+        "junit:junit:4.13.2": None,
+    }
+
+
+def test_read_gradle_resolves_bundles():
+    catalog, _ = module_map.read_version_catalog(FIXTURES, "es")
+    gradle = module_map.read_gradle(FIXTURES / "core" / "network", catalog)
+    assert gradle["dependencies"]["libraries"][0]["resolved"] == ["com.squareup.retrofit2:retrofit:2.11.0",
+                                                                   "com.squareup.okhttp3:okhttp:4.12.0"]
+
+
+def test_module_type_comes_from_the_catalog_plugin_id(tmp_path):
+    (tmp_path / "build.gradle.kts").write_text("plugins {\n    alias(libs.plugins.agp.lib)\n}\n", encoding="utf-8")
+    catalog = {"libraries": {}, "bundles": {}, "plugins": {"agp.lib": "com.android.library"}}
+    assert module_map.read_gradle(tmp_path, catalog)["type"] == "android-library"
+    assert module_map.read_gradle(tmp_path)["type"] is None
+
+
+def test_read_settings():
+    assert module_map.read_settings(FIXTURES) == {"name": "TestProject",
+                                                  "modules": [":app", ":core:network", ":feature:login"]}
+
+
+def test_read_manifest():
+    manifest = module_map.read_manifest(LOGIN_DIR / "src" / "main" / "AndroidManifest.xml", "com.acme.login")
+    assert manifest == {"permissions": ["android.permission.INTERNET"],
+                        "components": [{"type": "activity", "class": "com.acme.login.ui.LoginActivity",
+                                        "exported": True}]}
+
+
+def test_malformed_manifest_becomes_a_warning(project):
+    (project / "feature" / "login" / "src" / "main" / "AndroidManifest.xml").write_text("<manifest", encoding="utf-8")
+    _, result, _ = module_map.map_module(project / "feature" / "login", project, False, {"status": "skipped"},
+                                         lang="en")
+    assert "manifest" not in result["module"]
+    assert any(w.startswith("malformed AndroidManifest.xml") for w in result["warnings"])
+
+
+def test_inner_modules_and_gradle_paths():
+    assert [p.relative_to(FIXTURES).as_posix() for p in module_map.inner_modules(FIXTURES)] == \
+        ["app", "core/network", "feature/login"]
+    assert module_map.gradle_module(LOGIN_DIR / "src" / "main", FIXTURES) == (LOGIN_DIR, ":feature:login")
+
+
+# ---------- the AST map ----------
+
+def test_map_header(login_map):
+    assert login_map["schema"] == "module-map/1"
+    assert login_map["project"]["name"] == "TestProject"
+    assert login_map["module"]["path"] == ":feature:login"
+    assert login_map["module"]["manifest"]["components"][0]["exported"] is True
+    assert login_map["sources"]["ast"] == {"parser": "tree-sitter-kotlin", "files": 6}
+    assert login_map["sources"]["codegraph"] == {"status": "skipped"}
+    assert login_map["legend"] == module_map.LEGEND["es"]
+
+
+@pytest.mark.parametrize("node_id, kind, role", [
+    ("com.acme.login.ui.LoginViewModel", "class", "viewmodel"),
+    ("com.acme.login.ui.LoginActivity", "class", "android_entry"),
+    ("com.acme.login.ui.LoginScreen", "function", "composable"),
+    ("com.acme.login.ui.LoginForm", "function", "composable"),
+    ("com.acme.login.domain.LoginUseCase", "class", "usecase"),
+    ("com.acme.login.domain.AuthRepository", "interface", "repository"),
+    ("com.acme.login.data.AuthRepositoryImpl", "class", "repository"),
+    ("com.acme.login.data.AuthApi", "interface", "api_service"),
+    ("com.acme.login.di.LoginModule", "class", "di_module"),
+    ("com.acme.login.data.SessionStore", "class", None),
+])
+def test_declarations(nodes, node_id, kind, role):
+    assert nodes[node_id]["kind"] == kind
+    assert nodes[node_id].get("role") == role
+
+
+def test_nested_sealed_subtypes(nodes):
+    subtypes = {n["name"] for n in nodes.values() if n.get("parent") == "com.acme.login.ui.LoginUiState"}
+    assert subtypes == {"Idle", "Loading", "Success", "Error"}
+    assert "sealed" in nodes["com.acme.login.ui.LoginUiState"]["modifiers"]
+
+
+def test_kdoc_and_constructor(nodes):
+    viewmodel = nodes["com.acme.login.ui.LoginViewModel"]
+    assert viewmodel["doc"] == "Coordina el flujo de inicio de sesión y expone el estado a la UI."
+    assert next(f for f in viewmodel["functions"] if f["name"] == "submit")["doc"] == \
+        "Lanza el login con las credenciales dadas."
+    assert viewmodel["constructor"] == [{"name": "login", "type": "LoginUseCase"}]
+    assert viewmodel["constructor_annotations"] == ["Inject"]
+
+
+@pytest.mark.parametrize("source, target, kind", [
+    ("com.acme.login.data.AuthRepositoryImpl", "com.acme.login.domain.AuthRepository", "implements"),
+    ("com.acme.login.ui.LoginViewModel", "com.acme.login.domain.LoginUseCase", "depends_on"),
+    ("com.acme.login.domain.LoginUseCase", "com.acme.login.domain.AuthRepository", "depends_on"),
+    ("com.acme.login.data.AuthRepositoryImpl", "com.acme.network.ApiClient", "depends_on"),
+    ("com.acme.login.di.LoginModule", "com.acme.login.domain.AuthRepository", "provides"),
+    ("com.acme.login.di.LoginModule", "com.acme.login.data.AuthApi", "provides"),
+    ("com.acme.login.ui.LoginViewModel", "androidx.lifecycle.ViewModel", "extends"),
+    ("com.acme.login.ui.LoginActivity", "androidx.activity.ComponentActivity", "extends"),
+])
+def test_relationships(edges, source, target, kind):
+    assert (source, target, kind) in edges
+
+
+def test_injected_constructors_are_marked(login_map):
+    injected = [e for e in login_map["edges"] if e["kind"] == "depends_on" and any(d.get("di") for d in e["details"])]
+    assert len(injected) == 5
+
+
+def test_java_class_is_invisible_without_codegraph(nodes):
+    assert "com.acme.login.data.LegacyCrypto" not in nodes
+
+
+def test_external_nodes(login_map):
+    externals = {n["id"]: n["origin"] for n in login_map["external_nodes"]}
+    assert externals["com.acme.network.ApiClient"] == "library"  # only codegraph knows it is a project module
+    assert externals["androidx.lifecycle.ViewModel"] == "library"
+
+
+def test_libraries_are_resolved_in_the_map(login_map):
+    libraries = login_map["module"]["dependencies"]["libraries"]
+    assert {"notation": "libs.compose.ui", "configuration": "implementation",
+            "resolved": "androidx.compose.ui:ui"} in libraries

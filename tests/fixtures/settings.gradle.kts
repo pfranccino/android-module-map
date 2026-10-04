@@ -1,2 +1,2 @@
 rootProject.name = "TestProject"
-include(":feature:login")
+include(":app", ":core:network", ":feature:login")
