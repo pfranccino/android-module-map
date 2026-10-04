@@ -10,14 +10,16 @@ Sources and what each one contributes:
   2. codegraph (.codegraph/codegraph.db): calls, instantiations and references,
      including those that cross the module boundary. It resolves by name, so
      every edge carries its confidence. Tested with @colbymchenry/codegraph 1.6.1.
-  3. Gradle + AndroidManifest: module type, dependencies between modules, components.
+  3. Gradle + AndroidManifest: module type, dependencies between modules, components. The
+     libs.* notations are resolved with the version catalog, gradle/libs.versions.toml.
   4. Android CLI (`android describe`): build metadata of the project.
 
-Usage: python module_map.py <module_directory>
+Usage: python module_map.py <module_directory> [--lang en]
        python module_map.py <directory_with_several_modules>
 
 Each map is written inside its own module, in <module>/docs/architecture/. Pass -o to collect
-them in one directory instead.
+them in one directory instead. Messages and the legend inside the map follow --lang, then the
+MODULE_MAP_LANG variable, then `lang` in .module-map.toml; Spanish by default.
 Deps:  tree-sitter and tree-sitter-kotlin. If they are not installed, the script creates its own
        environment in ~/.cache/module-map/venv, installs them there and re-runs itself inside it.
 """
@@ -36,40 +38,155 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Versions the script was tested with: the grammar defines the node names it reads.
-REQUIREMENTS = ("tree-sitter==0.26.0", "tree-sitter-kotlin==1.1.0")
+REQUIREMENTS = ("tree-sitter==0.26.0", "tree-sitter-kotlin==1.1.0", 'tomli>=2.0.1; python_version < "3.11"')
 VENV = Path.home() / ".cache" / "module-map" / "venv"
+LANGS = ("es", "en")
+DEFAULT_LANG = "es"
+CONFIG_FILE = ".module-map.toml"
+SETTINGS_FILES = ("settings.gradle.kts", "settings.gradle")
+
+MESSAGES = {
+    "es": {
+        "deps_unimportable": "Las dependencias no se pueden importar desde {venv}. Borra ese directorio y reintenta.",
+        "python_too_old": "module_map.py necesita Python 3.10 o superior.",
+        "first_run": "[module_map] primera ejecución: instalando {requirements} en {venv}...",
+        "venv_failed": "No se pudo preparar el entorno ({error}). Hace falta conexión para la primera "
+                       "instalación y, en Debian/Ubuntu, el paquete python3-venv.",
+        "partial_parse": "parse parcial, puede faltar alguna declaración: {file}",
+        "codegraph_hint": "ejecuta `codegraph init` en la raíz del proyecto",
+        "codegraph_sync": "codegraph sync (incremental)...",
+        "codegraph_not_in_path": "codegraph no está en el PATH: se usó el índice tal cual, puede estar desactualizado",
+        "describe_running": "android describe (ejecuta Gradle, máximo {minutes} min)...",
+        "describe_timeout": "android describe superó el límite: el mapa se escribe sin esos metadatos",
+        "manifest_invalid": "AndroidManifest.xml mal formado, se omite: {file} ({error})",
+        "catalog_no_toml": "no se leyó {file}: hace falta Python 3.11+ o el paquete tomli, así que las "
+                           "dependencias libs.* quedan sin resolver",
+        "catalog_invalid": "{file} no es TOML válido, las dependencias libs.* quedan sin resolver ({error})",
+        "parsing": "{module}: parseando {count} archivos...",
+        "summary": "{nodes} nodos, {externals} externos, {edges} aristas, {warnings} avisos",
+        "no_dir": "No existe el directorio: {path}",
+        "no_kotlin": "No hay archivos .kt en {path}",
+        "output_not_json": "{path} contiene {count} módulos: -o debe ser un directorio, no un archivo .json",
+        "modules_found": "módulos Gradle encontrados en {path}: {count}",
+        "module_skipped": "{path}: sin archivos .kt propios, se omite",
+        "no_module_has_kotlin": "Ningún módulo de {path} tiene archivos .kt",
+        "maps_written_to": "{count} mapas escritos en {path}",
+        "maps_written_each": "{count} mapas escritos, cada uno en su módulo",
+        "config_not_found": "No existe el archivo de configuración: {path}",
+        "config_no_toml": "{file} necesita Python 3.11+ o el paquete tomli para leerse",
+        "config_invalid_toml": "{file} no es TOML válido: {error}",
+        "bad_lang": "Idioma no soportado: {value!r}. Disponibles: {langs}",
+        "cli_description": "Mapa JSON de un módulo Kotlin/Android para diagramar con un LLM.",
+        "help_module_dir": "directorio de un módulo, de un paquete dentro de él, o que contiene varios módulos",
+        "help_output": "directorio donde reunir los JSON (por defecto, cada uno en <módulo>/docs/architecture); "
+                       "con un solo módulo también puede ser el archivo .json de salida",
+        "help_no_codegraph": "no leer el índice de codegraph",
+        "help_android_cli": "ejecutar `android describe` y adjuntar sus metadatos de build (lanza Gradle, puede tardar)",
+        "help_lang": "idioma de los mensajes y de la leyenda del mapa; si no se indica, MODULE_MAP_LANG, "
+                     "luego `lang` en .module-map.toml, luego es",
+        "help_config": "archivo .module-map.toml; por defecto se busca desde el módulo hasta la raíz del proyecto",
+    },
+    "en": {
+        "deps_unimportable": "The dependencies cannot be imported from {venv}. Delete that directory and retry.",
+        "python_too_old": "module_map.py needs Python 3.10 or later.",
+        "first_run": "[module_map] first run: installing {requirements} in {venv}...",
+        "venv_failed": "Could not prepare the environment ({error}). The first installation needs network "
+                       "access and, on Debian/Ubuntu, the python3-venv package.",
+        "partial_parse": "partial parse, a declaration may be missing: {file}",
+        "codegraph_hint": "run `codegraph init` at the project root",
+        "codegraph_sync": "codegraph sync (incremental)...",
+        "codegraph_not_in_path": "codegraph is not on the PATH: the index was used as is and may be out of date",
+        "describe_running": "android describe (runs Gradle, at most {minutes} min)...",
+        "describe_timeout": "android describe hit the time limit: the map is written without that metadata",
+        "manifest_invalid": "malformed AndroidManifest.xml, skipped: {file} ({error})",
+        "catalog_no_toml": "{file} was not read: it needs Python 3.11+ or the tomli package, so the libs.* "
+                           "dependencies stay unresolved",
+        "catalog_invalid": "{file} is not valid TOML, the libs.* dependencies stay unresolved ({error})",
+        "parsing": "{module}: parsing {count} files...",
+        "summary": "{nodes} nodes, {externals} externals, {edges} edges, {warnings} warnings",
+        "no_dir": "Directory not found: {path}",
+        "no_kotlin": "No .kt files in {path}",
+        "output_not_json": "{path} contains {count} modules: -o must be a directory, not a .json file",
+        "modules_found": "Gradle modules found in {path}: {count}",
+        "module_skipped": "{path}: no .kt files of its own, skipped",
+        "no_module_has_kotlin": "No module in {path} has .kt files",
+        "maps_written_to": "{count} maps written to {path}",
+        "maps_written_each": "{count} maps written, each one inside its module",
+        "config_not_found": "Configuration file not found: {path}",
+        "config_no_toml": "{file} needs Python 3.11+ or the tomli package to be read",
+        "config_invalid_toml": "{file} is not valid TOML: {error}",
+        "bad_lang": "Unsupported language: {value!r}. Available: {langs}",
+        "cli_description": "JSON map of a Kotlin/Android module, to diagram it with a script or an LLM.",
+        "help_module_dir": "directory of a module, of a package inside one, or that contains several modules",
+        "help_output": "directory to collect the JSON files in (by default, each one goes to "
+                       "<module>/docs/architecture); with a single module it can also be the output .json file",
+        "help_no_codegraph": "do not read the codegraph index",
+        "help_android_cli": "run `android describe` and attach its build metadata (runs Gradle, can be slow)",
+        "help_lang": "language of the messages and of the map legend; when absent, MODULE_MAP_LANG, "
+                     "then `lang` in .module-map.toml, then es",
+        "help_config": ".module-map.toml file; by default it is looked up from the module to the project root",
+    },
+}
 
 
-def bootstrap():
+def tr(lang, message, /, **values):
+    return MESSAGES[lang][message].format(**values)
+
+
+def bootstrap(lang):
     """Dependencies are missing: install them in a dedicated environment and re-run the script inside it."""
     if os.environ.get("MODULE_MAP_BOOTSTRAPPED"):
-        sys.exit(f"Las dependencias no se pueden importar desde {VENV}. Borra ese directorio y reintenta.")
+        sys.exit(tr(lang, "deps_unimportable", venv=VENV))
     if sys.version_info < (3, 10):
-        sys.exit("module_map.py necesita Python 3.10 o superior.")
+        sys.exit(tr(lang, "python_too_old"))
     python = VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     ready = VENV / ".ready"  # records which versions were installed, so pip is not called on every run
     if not ready.is_file() or ready.read_text() != " ".join(REQUIREMENTS):
-        print(f"[module_map] primera ejecución: instalando {', '.join(REQUIREMENTS)} en {VENV}...",
-              file=sys.stderr, flush=True)
+        print(tr(lang, "first_run", requirements=", ".join(REQUIREMENTS), venv=VENV), file=sys.stderr, flush=True)
         try:
             venv.create(VENV, with_pip=True, clear=True)
             subprocess.run([str(python), "-m", "pip", "install", "--quiet", "--disable-pip-version-check",
                             *REQUIREMENTS], check=True)
         except (subprocess.CalledProcessError, OSError) as error:
-            sys.exit(f"No se pudo preparar el entorno ({error}). Hace falta conexión para la primera "
-                     "instalación y, en Debian/Ubuntu, el paquete python3-venv.")
+            sys.exit(tr(lang, "venv_failed", error=error))
         ready.write_text(" ".join(REQUIREMENTS))
     env = {**os.environ, "MODULE_MAP_BOOTSTRAPPED": "1"}
     sys.exit(subprocess.run([str(python), __file__, *sys.argv[1:]], env=env).returncode)
 
 
-try:
-    import tree_sitter_kotlin
-    from tree_sitter import Language, Parser
-except ImportError:
-    bootstrap()
+def dependencies_available():
+    try:
+        import tree_sitter  # noqa: F401
+        import tree_sitter_kotlin  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
-PARSER = Parser(Language(tree_sitter_kotlin.language()))
+
+PARSER = None  # built on first use, so importing this module needs neither tree-sitter nor network
+
+
+def kotlin_parser():
+    global PARSER
+    if PARSER is None:
+        import tree_sitter_kotlin
+        from tree_sitter import Language, Parser
+        PARSER = Parser(Language(tree_sitter_kotlin.language()))
+    return PARSER
+
+
+def toml_module():
+    """tomllib (Python 3.11+) or its backport tomli; None when neither is available."""
+    try:
+        import tomllib
+        return tomllib
+    except ModuleNotFoundError:
+        try:
+            import tomli
+            return tomli
+        except ModuleNotFoundError:
+            return None
+
 
 TYPE_NODES = ("user_type", "nullable_type", "function_type", "parenthesized_type", "non_nullable_type")
 VISIBILITY = {"public", "private", "internal", "protected"}
@@ -136,29 +253,60 @@ def layer_from_imports(imports):
 
 # Travels inside the JSON so whoever consumes it does not have to guess the semantics.
 LEGEND = {
-    "edge_kinds": {
-        "extends": "herencia de clase (o interfaz que extiende interfaz)",
-        "implements": "implementación de interfaz",
-        "depends_on": "colaborador recibido por constructor o campo @Inject",
-        "provides": "módulo Hilt/Dagger que aporta ese tipo al grafo (@Provides / @Binds)",
-        "uses_type": "el tipo aparece en propiedades o firmas",
-        "calls": "llamada a función o método",
-        "instantiates": "construcción de una instancia",
-        "references": "otra referencia al símbolo",
+    "es": {
+        "edge_kinds": {
+            "extends": "herencia de clase (o interfaz que extiende interfaz)",
+            "implements": "implementación de interfaz",
+            "depends_on": "colaborador recibido por constructor o campo @Inject",
+            "provides": "módulo Hilt/Dagger que aporta ese tipo al grafo (@Provides / @Binds)",
+            "uses_type": "el tipo aparece en propiedades o firmas",
+            "calls": "llamada a función o método",
+            "instantiates": "construcción de una instancia",
+            "references": "otra referencia al símbolo",
+        },
+        "provenance": {
+            "ast": "leído de la sintaxis del módulo",
+            "codegraph": "resuelto por nombre; si aparece solo, nada en el archivo que llama nombra al destino "
+                         "(mismo paquete o import con *): revisar si confidence es menor que 0.9",
+            "codegraph + ast": "codegraph vio la referencia y el archivo que llama la respalda con un tipo "
+                               "declarado o un import",
+        },
+        "details.resolved_by": "ast_receiver_type = el destino se fijó con el tipo declarado del receptor; "
+                               "ast_import = se fijó con el import del nombre en el archivo que llama; "
+                               "corrected_from es lo que proponía codegraph",
+        "weight": "número de apariciones agregadas en la arista",
+        "visibility": "si no aparece, es public",
+        "external_nodes.origin": "project = otro módulo de este repo; library = dependencia externa",
+        "module.dependencies.libraries.resolved": "coordenadas group:name:version leídas de "
+                                                  "gradle/libs.versions.toml (una lista para un bundle)",
     },
-    "provenance": {
-        "ast": "leído de la sintaxis del módulo",
-        "codegraph": "resuelto por nombre; si aparece solo, nada en el archivo que llama nombra al destino "
-                     "(mismo paquete o import con *): revisar si confidence es menor que 0.9",
-        "codegraph + ast": "codegraph vio la referencia y el archivo que llama la respalda con un tipo "
-                           "declarado o un import",
+    "en": {
+        "edge_kinds": {
+            "extends": "class inheritance (or an interface extending an interface)",
+            "implements": "interface implementation",
+            "depends_on": "collaborator received through the constructor or an @Inject field",
+            "provides": "Hilt/Dagger module that contributes this type to the graph (@Provides / @Binds)",
+            "uses_type": "the type appears in properties or signatures",
+            "calls": "function or method call",
+            "instantiates": "construction of an instance",
+            "references": "any other reference to the symbol",
+        },
+        "provenance": {
+            "ast": "read from the module's syntax",
+            "codegraph": "resolved by name; when it appears alone, nothing in the calling file names the target "
+                         "(same package or star import): review it when confidence is below 0.9",
+            "codegraph + ast": "codegraph saw the reference and the calling file backs it with a declared type "
+                               "or an import",
+        },
+        "details.resolved_by": "ast_receiver_type = the target was fixed with the declared type of the receiver; "
+                               "ast_import = it was fixed with the import of the name in the calling file; "
+                               "corrected_from is what codegraph proposed",
+        "weight": "number of occurrences aggregated in the edge",
+        "visibility": "public when absent",
+        "external_nodes.origin": "project = another module of this repo; library = external dependency",
+        "module.dependencies.libraries.resolved": "group:name:version coordinates read from "
+                                                  "gradle/libs.versions.toml (a list for a bundle)",
     },
-    "details.resolved_by": "ast_receiver_type = el destino se fijó con el tipo declarado del receptor; "
-                           "ast_import = se fijó con el import del nombre en el archivo que llama; "
-                           "corrected_from es lo que proponía codegraph",
-    "weight": "número de apariciones agregadas en la arista",
-    "visibility": "si no aparece, es public",
-    "external_nodes.origin": "project = otro módulo de este repo; library = dependencia externa",
 }
 
 # codegraph node kinds that count as the "owner" of their members.
@@ -309,7 +457,81 @@ DEPENDENCY_RE = re.compile(
     r"(?:^|[{;])\s*(\w*(?:[iI]mplementation|[aA]pi|[cC]ompileOnly|[rR]untimeOnly|[kK]sp|[kK]apt))\s*\(?\s*(.+?)\)?\s*$", re.M)
 
 
-def read_gradle(gradle_dir):
+def catalog_alias(alias):
+    """Gradle turns the -, _ and . of a catalog alias into the dots of its accessor: compose-bom -> compose.bom."""
+    return re.sub(r"[-_.]", ".", alias)
+
+
+def read_version_catalog(root, lang):
+    """-> (catalog, warning). gradle/libs.versions.toml, the default catalog, resolves the libs.* notations."""
+    path = root / "gradle" / "libs.versions.toml"
+    if not path.is_file():
+        return None, None
+    file = path.relative_to(root).as_posix()
+    toml = toml_module()
+    if toml is None:
+        return None, tr(lang, "catalog_no_toml", file=file)
+    try:
+        data = toml.loads(path.read_text(encoding="utf-8"))
+    except toml.TOMLDecodeError as error:
+        return None, tr(lang, "catalog_invalid", file=file, error=error)
+
+    def table(name):
+        value = data.get(name, {})
+        return value if isinstance(value, dict) else {}
+
+    versions = table("versions")
+
+    def version(spec, follow_ref=True):
+        """'1.0', {ref = 'x'} or a rich version {strictly/require/prefer = '1.0'} -> '1.0'."""
+        if isinstance(spec, str):
+            return spec
+        if not isinstance(spec, dict):
+            return None
+        if follow_ref and "ref" in spec:
+            return version(versions.get(spec["ref"]), follow_ref=False)
+        return next((spec[k] for k in ("strictly", "require", "prefer") if isinstance(spec.get(k), str)), None)
+
+    libraries = {}
+    for alias, spec in table("libraries").items():
+        if isinstance(spec, str):  # "group:name:version"
+            libraries[catalog_alias(alias)] = spec
+        elif isinstance(spec, dict):
+            module = spec.get("module") or (f"{spec['group']}:{spec['name']}" if "group" in spec and "name" in spec
+                                            else None)
+            if module:
+                resolved = version(spec.get("version"))
+                libraries[catalog_alias(alias)] = f"{module}:{resolved}" if resolved else module
+    bundles = {catalog_alias(alias): [libraries[catalog_alias(m)] for m in members if catalog_alias(m) in libraries]
+               for alias, members in table("bundles").items() if isinstance(members, list)}
+    plugins = {}
+    for alias, spec in table("plugins").items():
+        plugin_id = spec.split(":")[0] if isinstance(spec, str) else spec.get("id") if isinstance(spec, dict) else None
+        if plugin_id:
+            plugins[catalog_alias(alias)] = plugin_id
+    return {"libraries": libraries, "bundles": bundles, "plugins": plugins}, None
+
+
+def catalog_library(notation, catalog):
+    """libs.x -> 'group:name:version', libs.bundles.x -> list of them; None when the catalog does not have it."""
+    inner = re.fullmatch(r"(?:\w+\()?([\w.]+)\)?", notation)  # platform(libs.compose.bom)
+    accessor = inner.group(1) if inner else notation
+    if not catalog or not accessor.startswith("libs."):
+        return None
+    key = accessor[len("libs."):]
+    if key.startswith("bundles."):
+        return catalog["bundles"].get(key[len("bundles."):])
+    return catalog["libraries"].get(key)
+
+
+def catalog_plugin(plugin, catalog):
+    """libs.plugins.android.library -> com.android.library."""
+    if catalog and plugin.startswith("libs.plugins."):
+        return catalog["plugins"].get(plugin[len("libs.plugins."):])
+    return None
+
+
+def read_gradle(gradle_dir, catalog=None):
     """Plugins, namespace and dependencies read from build.gradle(.kts) without running Gradle."""
     build = next((gradle_dir / f for f in BUILD_FILES if (gradle_dir / f).is_file()), None)
     if build is None:
@@ -317,7 +539,7 @@ def read_gradle(gradle_dir):
     text = build.read_text(encoding="utf-8")
     block = re.search(r"plugins\s*\{(.*?)\}", text, re.S)
     plugins = re.findall(r"""\b(?:id|alias|kotlin)\b\s*\(?\s*["']?([\w.\-]+)""", block.group(1)) if block else []
-    joined = " ".join(plugins).lower()
+    joined = " ".join(catalog_plugin(p, catalog) or p for p in plugins).lower()
     module_type = next((f"android-{k}" for k in ("application", "dynamic-feature", "library")
                         if "android" in joined and k in joined), None)
     namespace = re.search(r"""namespace\s*=?\s*["']([^"']+)["']""", text)
@@ -331,13 +553,17 @@ def read_gradle(gradle_dir):
             modules.append({"path": ":" + value[len("projects."):].replace(".", ":"), "configuration": configuration})
         elif re.fullmatch(r"""(?:platform\()?["']?[\w.:\-]+["']?\)?""", value):
             value += ")" * (value.count("(") - value.count(")"))  # the regex swallows the closing parenthesis
-            libraries.append({"notation": value.strip("\"'"), "configuration": configuration})
+            library = {"notation": value.strip("\"'"), "configuration": configuration}
+            resolved = catalog_library(library["notation"], catalog)
+            if resolved:
+                library["resolved"] = resolved
+            libraries.append(library)
     return {"type": module_type, "namespace": namespace.group(1) if namespace else None,
             "plugins": plugins, "dependencies": {"modules": modules, "libraries": libraries}}
 
 
 def read_settings(root):
-    settings = next((root / f for f in ("settings.gradle.kts", "settings.gradle") if (root / f).is_file()), None)
+    settings = next((root / f for f in SETTINGS_FILES if (root / f).is_file()), None)
     if settings is None:
         return {}
     text = settings.read_text(encoding="utf-8")
@@ -368,9 +594,10 @@ def read_manifest(path, namespace):
 # ---------- the map ----------
 
 class ModuleMap:
-    def __init__(self, root, module_dir):
+    def __init__(self, root, module_dir, lang=DEFAULT_LANG):
         self.root = root
         self.module_dir = module_dir
+        self.lang = lang
         self.nodes = {}      # id -> node declared in the module
         self.externals = {}  # id -> node from another module or a library
         self.edges = {}      # (from, to, kind) -> edge
@@ -404,10 +631,10 @@ class ModuleMap:
     # --- step 1: AST ---
 
     def parse_file(self, path):
-        tree = PARSER.parse(path.read_bytes()).root_node
+        tree = kotlin_parser().parse(path.read_bytes()).root_node
         file = self.rel(path)
         if tree.has_error:
-            self.warnings.append(f"parse parcial, puede faltar alguna declaración: {file}")
+            self.warnings.append(tr(self.lang, "partial_parse", file=file))
         header = first(tree, "package_header")
         package = txt(first(header, "qualified_identifier")) if header else ""
         imports, stars = {}, []
@@ -618,17 +845,17 @@ class ModuleMap:
         db = next((d / ".codegraph" / "codegraph.db" for d in [self.module_dir, *self.module_dir.parents]
                    if (d / ".codegraph" / "codegraph.db").is_file()), None)
         if db is None:
-            return {"status": "not_found", "hint": "ejecuta `codegraph init` en la raíz del proyecto"}
+            return {"status": "not_found", "hint": tr(self.lang, "codegraph_hint")}
         cg_root = db.parent.parent
         binary = shutil.which("codegraph")
         if cg_root in SYNCED:
             pass
         elif binary:  # the index must be up to date: edges are matched to the AST by line number
-            log("codegraph sync (incremental)...")
+            log(tr(self.lang, "codegraph_sync"))
             subprocess.run([binary, "sync", "--quiet", str(cg_root)], capture_output=True)
             SYNCED.add(cg_root)
         else:
-            self.warnings.append("codegraph no está en el PATH: se usó el índice tal cual, puede estar desactualizado")
+            self.warnings.append(tr(self.lang, "codegraph_not_in_path"))
 
         con = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True)
         module_rel = self.module_dir.relative_to(cg_root).as_posix()
@@ -778,13 +1005,14 @@ class ModuleMap:
             version = con.execute("SELECT value FROM project_metadata WHERE key = 'indexed_with_version'").fetchone()
         except sqlite3.OperationalError:
             version = None
+        con.close()
         return {"status": "ok", "db": self.rel(db), "version": version[0] if version else None,
                 "edges_used": used, "edges_discarded": discarded}
 
 
 # ---------- Android CLI ----------
 
-def android_describe(root):
+def android_describe(root, lang=DEFAULT_LANG):
     """`android describe` prints paths to JSON files with the project's build structure; they are attached as is.
 
     The output format is taken from the Android CLI documentation, not verified against the binary:
@@ -795,12 +1023,12 @@ def android_describe(root):
         return {"status": "not_found"}
     # Triggers Gradle and can take minutes. The limit stays below the one agents usually put on a
     # command, so the script finishes on its own and the map is still written.
-    log(f"android describe (ejecuta Gradle, máximo {DESCRIBE_TIMEOUT // 60} min; se omite con --no-android-cli)...")
+    log(tr(lang, "describe_running", minutes=DESCRIBE_TIMEOUT // 60))
     try:
         run = subprocess.run([binary, "describe", f"--project_dir={root}"],
                              capture_output=True, text=True, timeout=DESCRIBE_TIMEOUT)
     except subprocess.TimeoutExpired:
-        log("android describe superó el límite: el mapa se escribe sin esos metadatos")
+        log(tr(lang, "describe_timeout"))
         return {"status": "timeout"}
     if run.returncode != 0:
         return {"status": "error", "message": (run.stderr or run.stdout).strip()[-1000:]}
@@ -867,24 +1095,28 @@ def inner_modules(directory):
     return found
 
 
-def map_module(module_dir, root, use_codegraph, android_cli):
+def map_module(module_dir, root, use_codegraph, android_cli, lang=DEFAULT_LANG, catalog=None, warnings=()):
     """-> (name for the file, map, summary), or None if the module has no Kotlin sources."""
     gradle_dir, gradle_path = gradle_module(module_dir, root)
-    mm = ModuleMap(root, module_dir)
+    mm = ModuleMap(root, module_dir, lang)
+    mm.warnings.extend(warnings)
     files = list(kotlin_files(module_dir, gradle_dir, root))
     if not files:
         return None
-    log(f"{gradle_path or module_dir.name}: parseando {len(files)} archivos...")
+    log(tr(lang, "parsing", module=gradle_path or module_dir.name, count=len(files)))
     for path in files:
         mm.parse_file(path)
     mm.link()
 
     module = {"path": gradle_path, "dir": mm.rel(module_dir)}
     if gradle_dir:
-        module.update(read_gradle(gradle_dir))
+        module.update(read_gradle(gradle_dir, catalog))
         manifest = gradle_dir / "src" / "main" / "AndroidManifest.xml"
         if manifest.is_file():
-            module["manifest"] = read_manifest(manifest, module["namespace"])
+            try:
+                module["manifest"] = read_manifest(manifest, module["namespace"])
+            except ET.ParseError as error:
+                mm.warnings.append(tr(lang, "manifest_invalid", file=mm.rel(manifest), error=error))
 
     sources = {"ast": {"parser": "tree-sitter-kotlin", "files": len(files)},
                "codegraph": mm.load_codegraph() if use_codegraph else {"status": "skipped"},
@@ -895,7 +1127,7 @@ def map_module(module_dir, root, use_codegraph, android_cli):
     result = compact({
         "schema": "module-map/1",
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "legend": LEGEND,
+        "legend": LEGEND[lang],
         "project": {"root": root.as_posix(), **read_settings(root)},
         "module": module,
         "sources": sources,
@@ -905,35 +1137,86 @@ def map_module(module_dir, root, use_codegraph, android_cli):
         "warnings": mm.warnings,
     })
     name = (gradle_path or "").strip(":").replace(":", "-") or module_dir.name
-    summary = f"{len(mm.nodes)} nodos, {len(externals)} externos, {len(edges)} aristas, {len(mm.warnings)} avisos"
+    summary = tr(lang, "summary", nodes=len(mm.nodes), externals=len(externals), edges=len(edges),
+                 warnings=len(mm.warnings))
     return name, result, summary
 
 
-def main():
-    cli = argparse.ArgumentParser(description="Mapa JSON de un módulo Kotlin/Android para diagramar con un LLM.")
-    cli.add_argument("module_dir", type=Path,
-                     help="directorio de un módulo, de un paquete dentro de él, o que contiene varios módulos")
-    cli.add_argument("-o", "--output", type=Path,
-                     help="directorio donde reunir los JSON (por defecto, cada uno en <módulo>/docs/architecture); "
-                          "con un solo módulo también puede ser el archivo .json de salida")
-    cli.add_argument("--no-codegraph", action="store_true", help="no leer el índice de codegraph")
-    cli.add_argument("--android-cli", action="store_true",
-                     help="ejecutar `android describe` y adjuntar sus metadatos de build (lanza Gradle, puede tardar)")
+def find_config(start, root):
+    """.module-map.toml in `start` or one of its parents, up to the project root."""
+    for directory in [start, *start.parents]:
+        if (directory / CONFIG_FILE).is_file():
+            return directory / CONFIG_FILE
+        if directory == root:
+            break
+    return None
+
+
+def read_config(path, lang):
+    toml = toml_module()
+    if toml is None:
+        sys.exit(tr(lang, "config_no_toml", file=path))
+    try:
+        return toml.loads(path.read_text(encoding="utf-8"))
+    except toml.TOMLDecodeError as error:
+        sys.exit(tr(lang, "config_invalid_toml", file=path, error=error))
+
+
+def requested_lang(flag):
+    """Language chosen before the config is read: --lang, then MODULE_MAP_LANG."""
+    lang = flag or os.environ.get("MODULE_MAP_LANG")
+    if lang and lang not in LANGS:
+        sys.exit(tr(DEFAULT_LANG, "bad_lang", value=lang, langs=", ".join(LANGS)))
+    return lang
+
+
+def parse_args():
+    # --lang is read first so that --help comes out in the requested language.
+    early = argparse.ArgumentParser(add_help=False)
+    early.add_argument("--lang", choices=LANGS)
+    lang = requested_lang(early.parse_known_args()[0].lang) or DEFAULT_LANG
+    cli = argparse.ArgumentParser(description=tr(lang, "cli_description"))
+    cli.add_argument("module_dir", type=Path, help=tr(lang, "help_module_dir"))
+    cli.add_argument("-o", "--output", type=Path, help=tr(lang, "help_output"))
+    cli.add_argument("--no-codegraph", action="store_true", help=tr(lang, "help_no_codegraph"))
+    cli.add_argument("--android-cli", action="store_true", help=tr(lang, "help_android_cli"))
     cli.add_argument("--no-android-cli", action="store_true", help=argparse.SUPPRESS)  # former default, now a no-op
-    args = cli.parse_args()
+    cli.add_argument("--lang", choices=LANGS, help=tr(lang, "help_lang"))
+    cli.add_argument("--config", type=Path, help=tr(lang, "help_config"))
+    return cli.parse_args()
+
+
+def main():
+    args = parse_args()
+    lang = requested_lang(args.lang) or DEFAULT_LANG
+    if not dependencies_available():
+        bootstrap(lang)
 
     module_dir = args.module_dir.resolve()
     if not module_dir.is_dir():
-        sys.exit(f"No existe el directorio: {module_dir}")
+        sys.exit(tr(lang, "no_dir", path=module_dir))
     root = next((d for d in [module_dir, *module_dir.parents]
-                 if any((d / f).is_file() for f in ("settings.gradle.kts", "settings.gradle"))), module_dir)
-    android_cli = android_describe(root) if args.android_cli else {"status": "skipped"}
+                 if any((d / f).is_file() for f in SETTINGS_FILES)), module_dir)
+    if args.config and not args.config.is_file():
+        sys.exit(tr(lang, "config_not_found", path=args.config))
+    config_path = args.config or find_config(module_dir, root)
+    config = read_config(config_path, lang) if config_path else {}
+    lang = requested_lang(args.lang) or config.get("lang") or DEFAULT_LANG
+    if lang not in LANGS:
+        sys.exit(tr(DEFAULT_LANG, "bad_lang", value=lang, langs=", ".join(LANGS)))
+
+    catalog, catalog_warning = read_version_catalog(root, lang)
+    warnings = [catalog_warning] if catalog_warning else []
+    android_cli = android_describe(root, lang) if args.android_cli else {"status": "skipped"}
+
+    def run(directory):
+        return map_module(directory, root, not args.no_codegraph, android_cli, lang, catalog, warnings)
 
     modules = inner_modules(module_dir)
     if modules in ([], [module_dir]):  # a single module, or a package inside a module
-        mapped = map_module(module_dir, root, not args.no_codegraph, android_cli)
+        mapped = run(module_dir)
         if mapped is None:
-            sys.exit(f"No hay archivos .kt en {module_dir}")
+            sys.exit(tr(lang, "no_kotlin", path=module_dir))
         name, result, summary = mapped
         output = args.output or module_dir / DOCS_DIR
         if output.suffix != ".json":  # a directory: same layout as with several modules
@@ -944,13 +1227,13 @@ def main():
         return
 
     if args.output and args.output.suffix == ".json":
-        sys.exit(f"{module_dir} contiene {len(modules)} módulos: -o debe ser un directorio, no un archivo .json")
-    log(f"módulos Gradle encontrados en {module_dir}: {len(modules)}")
+        sys.exit(tr(lang, "output_not_json", path=module_dir, count=len(modules)))
+    log(tr(lang, "modules_found", path=module_dir, count=len(modules)))
     written = 0
     for directory in modules:
-        mapped = map_module(directory, root, not args.no_codegraph, android_cli)
+        mapped = run(directory)
         if mapped is None:
-            log(f"{directory.relative_to(root).as_posix() or '.'}: sin archivos .kt propios, se omite")
+            log(tr(lang, "module_skipped", path=directory.relative_to(root).as_posix() or "."))
             continue
         name, result, summary = mapped
         output = (args.output or directory / DOCS_DIR) / f"{name}.module-map.json"
@@ -959,8 +1242,9 @@ def main():
         log(f"{output}: {summary}")
         written += 1
     if not written:
-        sys.exit(f"Ningún módulo de {module_dir} tiene archivos .kt")
-    log(f"{written} mapas escritos" + (f" en {args.output}" if args.output else ", cada uno en su módulo"))
+        sys.exit(tr(lang, "no_module_has_kotlin", path=module_dir))
+    log(tr(lang, "maps_written_to", count=written, path=args.output) if args.output
+        else tr(lang, "maps_written_each", count=written))
 
 
 if __name__ == "__main__":

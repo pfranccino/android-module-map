@@ -8,9 +8,11 @@ Flecha sólida: depende de o llama a. Flecha punteada: relación de tipos.
 
 ```mermaid
 graph TD
-    subgraph Other
+    subgraph Data
         n0["ApiClient"]
     end
+    classDef layerData fill:#fef3c7,stroke:#d97706,color:#0f172a
+    class n0 layerData
 ```
 
 ## Flujos desde los ViewModels
@@ -39,11 +41,11 @@ El mapa no registra `@Provides`, `@Binds` ni dependencias con `@Inject`.
 
 | Clase | Tipo | Capa | Rol | Responsabilidad (KDoc) |
 |---|---|---|---|---|
-| ApiClient | class | Other | - | (sin KDoc) |
+| ApiClient | class | Data | - | (sin KDoc) |
 
 ## Violaciones de capas
 
-No se encontraron violaciones. Se revisaron todas las aristas entre capas con estas reglas: Presentation no depende de Data, Domain no depende de Presentation ni de Data, Data no depende de Presentation. La capa DI está exenta.
+No se encontraron violaciones. Se revisaron todas las aristas entre clases del módulo contra estas dependencias prohibidas: Data → Presentation, Domain → Data, Domain → Presentation, Presentation → Data.
 
 ## Puntos de entrada
 

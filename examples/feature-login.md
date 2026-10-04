@@ -39,6 +39,16 @@ graph TD
     n6 --> n0
     n9 --> n10
     n0 -.implementado por.-> n1
+    classDef layerPresentation fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    class n2,n3,n4,n5 layerPresentation
+    classDef layerDomain fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    class n0,n6 layerDomain
+    classDef layerData fill:#fef3c7,stroke:#d97706,color:#0f172a
+    class n7,n1,n8 layerData
+    classDef layerDI fill:#f3e8ff,stroke:#9333ea,color:#0f172a
+    class n9 layerDI
+    classDef external fill:#ffffff,stroke:#94a3b8,stroke-dasharray:4,color:#334155
+    class n10 external
 ```
 
 ## Flujos desde los ViewModels
@@ -56,6 +66,12 @@ graph LR
     n1 --> n2
     n2 --> n3
     n2 --> n4
+    classDef layerPresentation fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    class n0 layerPresentation
+    classDef layerDomain fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    class n1,n2 layerDomain
+    classDef layerData fill:#fef3c7,stroke:#d97706,color:#0f172a
+    class n3,n4 layerData
 ```
 
 ## Secuencia: LoginViewModel.submit
@@ -141,7 +157,7 @@ graph LR
 
 ## Violaciones de capas
 
-No se encontraron violaciones. Se revisaron todas las aristas entre capas con estas reglas: Presentation no depende de Data, Domain no depende de Presentation ni de Data, Data no depende de Presentation. La capa DI está exenta.
+No se encontraron violaciones. Se revisaron todas las aristas entre clases del módulo contra estas dependencias prohibidas: Data → Presentation, Domain → Data, Domain → Presentation, Presentation → Data.
 
 ## Puntos de entrada
 

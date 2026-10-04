@@ -41,6 +41,10 @@ arrow is backed by an edge; a hand-drawn arrow breaks that guarantee.
    stderr; a normal run takes seconds. Do not pass `--android-cli` unless the user asks for build
    metadata: it runs Gradle for minutes and the diagrams do not use it.
 
+5. **Language.** Output is in Spanish unless `.module-map.toml` or `MODULE_MAP_LANG` says
+   otherwise. If the user writes in English or asks for English, pass `--lang en` to both
+   scripts; use the same language for both.
+
 If a script fails, show the full error and stop. Do not patch it or work around it without the
 user's approval.
 
@@ -89,18 +93,21 @@ document is overwritten on every run, so do not edit it.
      through something the map cannot see (navigation routes, reflection, generated code).
 2. **Layer violations.** For each row marked as unverified, confirm it in the source before
    calling it a violation.
-3. **Responsibilities.** For each class marked "(sin KDoc)", read it and write one sentence on
-   what it is responsible for.
+3. **Responsibilities.** For each class marked "(sin KDoc)" or "(no KDoc)", read it and write one
+   sentence on what it is responsible for.
 
 Report only what you checked, with `file:line` for each finding. If the review shows that a
 diagram is wrong, say which edge is wrong and why; do not fix the diagram by hand.
 
 ## When a diagram or rule should change
 
-The rules live in `scripts/module_diagrams.py`: which nodes are drawn, how layers are assigned
-(package segment `ui`/`presentation`/`domain`/`data`/`di`, then role), which layer crossings
-count as violations. If the user wants different behaviour, propose the change to the script and
-wait for approval, so the result stays reproducible.
+How layers are assigned (package segment, then role), which layer crossings count as
+violations, and the size above which the layer diagram is drawn by package can be set in
+`.module-map.toml` at the project root (`[layers.by_segment]`, `[layers.by_role]`,
+`layers.forbidden`, `layers.readable_limit`; see the README). If the user wants different
+behaviour, propose the change to that file and wait for approval, so the result stays
+reproducible. Propose a change to `scripts/module_diagrams.py` only for what the file cannot
+express, such as which nodes are drawn.
 
 ## Finish
 
