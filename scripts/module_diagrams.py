@@ -22,7 +22,7 @@ import argparse
 import json
 import os
 import sys
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 
 LAYERS = ["Presentation", "Domain", "Data", "DI", "Other"]
@@ -64,10 +64,16 @@ class Map:
             return "Domain" if node["kind"] == "interface" else "Data"
         return LAYER_BY_ROLE.get(node.get("role"), "Other")
 
-    def label(self, node_id):
+    def label(self, node_id, _seen=None):
         node = self.nodes.get(node_id) or self.externals.get(node_id) or {"name": node_id}
         parent = node.get("parent")
-        return f"{self.label(parent)}.{node['name']}" if parent else node["name"]
+        if parent:
+            seen = _seen or set()
+            if parent in seen:  # cycle in parent references: stop to avoid infinite recursion
+                return node["name"]
+            seen.add(node_id)
+            return f"{self.label(parent, seen)}.{node['name']}"
+        return node["name"]
 
     def where(self, edge):
         """Evidence for an edge: file of the source node and lines from its details."""
@@ -197,9 +203,9 @@ def flow_diagram(m):
     if not roots:
         return None, 0
 
-    arrows, order, pending = {}, list(roots), list(roots)  # (source, target) -> ViewModel functions
+    arrows, order, pending = {}, list(roots), deque(roots)  # (source, target) -> ViewModel functions
     while pending:
-        node = pending.pop(0)
+        node = pending.popleft()
         for source in [node, *sorted(m.implementers.get(node, []))]:  # an interface continues via its implementations
             for e in calls.get(source, []):
                 target = shown.get(e["to"], e["to"])
@@ -332,7 +338,8 @@ def hilt_diagram(m):
         lines += [f"        {declare(i)}" for i in outside]
         lines.append("    end")
     for e in provides:
-        binding = e.get("details", [{}])[0].get("binding", "provides").capitalize()
+        details = e.get("details") or [{}]
+        binding = details[0].get("binding", "provides").capitalize()
         lines.append(f'    {ids(e["from"])} -->|"@{binding}"| {ids(e["to"])}')
         if binding == "Binds":
             for implementation in sorted(m.implementers.get(e["to"], [])):

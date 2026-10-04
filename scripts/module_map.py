@@ -264,7 +264,9 @@ DEPENDENCY_RE = re.compile(
 
 def read_gradle(gradle_dir):
     """Plugins, namespace and dependencies read from build.gradle(.kts) without running Gradle."""
-    build = next(gradle_dir / f for f in BUILD_FILES if (gradle_dir / f).is_file())
+    build = next((gradle_dir / f for f in BUILD_FILES if (gradle_dir / f).is_file()), None)
+    if build is None:
+        return {"type": None, "namespace": None, "plugins": [], "dependencies": {"modules": [], "libraries": []}}
     text = build.read_text(encoding="utf-8")
     block = re.search(r"plugins\s*\{(.*?)\}", text, re.S)
     plugins = re.findall(r"""\b(?:id|alias|kotlin)\b\s*\(?\s*["']?([\w.\-]+)""", block.group(1)) if block else []
@@ -399,6 +401,11 @@ class ModuleMap:
         node_id = f"{scope}.{name}" if scope else name
         if node_id in self.nodes:  # overloads or extensions with the same name
             node_id += f"@{ts_node.start_point[0] + 1}"
+        suffix = 2
+        while node_id in self.nodes:  # still collides (same line in different files, or generated code)
+            node_id = f"{scope}.{name}@{ts_node.start_point[0] + 1}_{suffix}" if scope else \
+                      f"{name}@{ts_node.start_point[0] + 1}_{suffix}"
+            suffix += 1
         self.nodes[node_id] = {"id": node_id, "kind": kind, "name": name, "file": file,
                                "lines": [ts_node.start_point[0] + 1, ts_node.end_point[0] + 1], **fields}
         return self.nodes[node_id]
@@ -545,10 +552,13 @@ class ModuleMap:
                                                         "provenance": [provenance], "weight": 0, "details": []})
         if edge["provenance"][0] == provenance:
             edge["weight"] += 1
-            if detail and detail not in edge["details"]:
-                edge["details"].append(detail)
-        elif provenance not in edge["provenance"]:  # a second source confirms the edge: no extra weight or detail
+        elif provenance not in edge["provenance"]:
             edge["provenance"].append(provenance)
+        # Always record the detail regardless of provenance source, so that
+        # AST details (DI info, constructor params) are kept when codegraph
+        # created the edge first, and vice versa.
+        if detail and detail not in edge["details"]:
+            edge["details"].append(detail)
         return edge
 
     # --- step 3: codegraph ---
@@ -713,7 +723,10 @@ class ModuleMap:
             if row and not in_test_source_set(row[1]):
                 external.update(kind=row[0], file=self.rel(cg_root / row[1]), origin="project",
                                 module=gradle_module((cg_root / row[1]).parent, self.root)[1])
-        version = con.execute("SELECT value FROM project_metadata WHERE key = 'indexed_with_version'").fetchone()
+        try:
+            version = con.execute("SELECT value FROM project_metadata WHERE key = 'indexed_with_version'").fetchone()
+        except sqlite3.OperationalError:
+            version = None
         return {"status": "ok", "db": self.rel(db), "version": version[0] if version else None,
                 "edges_used": used, "edges_discarded": discarded}
 
@@ -759,11 +772,15 @@ def in_test_source_set(path):
 
 def kotlin_files(module_dir, gradle_dir, root):
     """.kt sources of the module: no build/, no test source sets and no nested submodules."""
+    cache = {}  # directory -> gradle_module result, avoids re-walking the tree for sibling files
     for path in sorted(module_dir.rglob("*.kt")):
         relative = path.relative_to(gradle_dir or module_dir)
         if relative.parts[:1] == ("build",) or in_test_source_set(relative):
             continue
-        if gradle_module(path.parent, root)[0] == gradle_dir:
+        parent = path.parent
+        if parent not in cache:
+            cache[parent] = gradle_module(parent, root)[0]
+        if cache[parent] == gradle_dir:
             yield path
 
 
