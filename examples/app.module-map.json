@@ -1,0 +1,17 @@
+{
+"schema": "module-map/1",
+"generated_at": "2026-10-02T23:39:02+00:00",
+"legend": {"edge_kinds": {"extends": "herencia de clase (o interfaz que extiende interfaz)", "implements": "implementación de interfaz", "depends_on": "colaborador recibido por constructor o campo @Inject", "provides": "módulo Hilt/Dagger que aporta ese tipo al grafo (@Provides / @Binds)", "uses_type": "el tipo aparece en propiedades o firmas", "calls": "llamada a función o método", "instantiates": "construcción de una instancia", "references": "otra referencia al símbolo"}, "provenance": {"ast": "leído de la sintaxis del módulo", "codegraph": "resuelto por nombre; si aparece solo, nada en el archivo que llama nombra al destino (mismo paquete o import con *): revisar si confidence es menor que 0.9", "codegraph + ast": "codegraph vio la referencia y el archivo que llama la respalda con un tipo declarado o un import"}, "details.resolved_by": "ast_receiver_type = el destino se fijó con el tipo declarado del receptor; ast_import = se fijó con el import del nombre en el archivo que llama; corrected_from es lo que proponía codegraph", "weight": "número de apariciones agregadas en la arista", "visibility": "si no aparece, es public", "external_nodes.origin": "project = otro módulo de este repo; library = dependencia externa"},
+"project": {"root": "/path/to/acme", "name": "Acme", "modules": [":app", ":core:network", ":feature:login"]},
+"module": {"path": ":app", "dir": "app", "type": "android-application", "plugins": ["com.android.application"], "dependencies": {"modules": [{"path": ":feature:login", "configuration": "implementation"}]}},
+"sources": {"ast": {"parser": "tree-sitter-kotlin", "files": 1}, "codegraph": {"status": "ok", "db": ".codegraph/codegraph.db", "version": "1.6.1", "edges_used": 1, "edges_discarded": 0}, "android_cli": {"status": "skipped"}},
+"nodes": [
+  {"id": "com.acme.app.MainNav", "kind": "function", "name": "MainNav", "file": "app/src/main/kotlin/com/acme/app/MainNav.kt", "lines": [6, 9], "signature": "fun MainNav()", "annotations": ["Composable"], "role": "composable"}
+],
+"external_nodes": [
+  {"id": "com.acme.login.ui.LoginScreen", "kind": "function", "name": "LoginScreen", "file": "feature/login/src/main/kotlin/com/acme/login/ui/LoginScreen.kt", "origin": "project", "module": ":feature:login"}
+],
+"edges": [
+  {"from": "com.acme.app.MainNav", "to": "com.acme.login.ui.LoginScreen", "kind": "calls", "provenance": ["codegraph", "ast"], "weight": 1, "details": [{"from": "MainNav", "to": "LoginScreen", "line": 8, "confidence": 0.9, "resolved_by": "exact-match"}]}
+]
+}
