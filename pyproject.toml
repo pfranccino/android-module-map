@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "android-module-map"
+version = "0.1.0"
+description = "Turn Kotlin/Android Gradle modules into Mermaid architecture diagrams and an analysis document."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "tree-sitter==0.26.0",
+    "tree-sitter-kotlin==1.1.0",
+    "tomli>=2.0.1; python_version < '3.11'",
+]
+keywords = ["android", "kotlin", "gradle", "architecture", "mermaid", "diagrams"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Environment :: Console",
+    "Topic :: Software Development :: Documentation",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+module-map = "module_map:main"
+module-diagrams = "module_diagrams:main"
+
+[project.urls]
+Repository = "https://github.com/pfranccino/android-module-map"
+
+[tool.setuptools]
+package-dir = { "" = "scripts" }
+py-modules = ["module_map", "module_diagrams"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

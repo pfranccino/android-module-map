@@ -1,0 +1,35 @@
+# Configuration for android-module-map.
+#
+# Copy this file to the root of your Android project (next to settings.gradle.kts) and rename it
+# to .module-map.toml. Every key is optional. The values below are the defaults, so copying the
+# file as is changes nothing: edit only what you need.
+
+# Language of the documents, the messages and the legend inside the map: "es" or "en".
+# --lang and the MODULE_MAP_LANG variable take precedence over this value.
+lang = "es"
+
+[layers]
+# Above this many drawn nodes, the layer diagram shows one box per package instead of one per class.
+readable_limit = 40
+
+# Dependencies between layers reported as violations, as [source, target] pairs.
+# This list replaces the default one entirely. Layers: Presentation, Domain, Data, DI, Other.
+forbidden = [
+    ["Data", "Presentation"],
+    ["Domain", "Data"],
+    ["Domain", "Presentation"],
+    ["Presentation", "Data"],
+]
+
+# Package segment -> layer, merged over the built-in table (ui, presentation, view, screen, compose,
+# viewmodel, domain, usecase, data, network, remote, api, local, db, repository, di, hilt, ...).
+# The innermost matching segment of a package wins.
+[layers.by_segment]
+# feature = "Presentation"
+# api = "Other"              # overrides the built-in api -> Data
+
+# Role -> layer, for classes whose package names no layer. Merged over the built-in table.
+# Roles: viewmodel, composable, activity, fragment, usecase, repository, api_service, dao, entity,
+# mapper, datasource, di_module, ...
+[layers.by_role]
+# mapper = "Data"

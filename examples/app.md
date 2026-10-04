@@ -15,6 +15,10 @@ graph TD
         n1["LoginScreen<br/>:feature:login"]
     end
     n0 --> n1
+    classDef layerPresentation fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    class n0 layerPresentation
+    classDef external fill:#ffffff,stroke:#94a3b8,stroke-dasharray:4,color:#334155
+    class n1 external
 ```
 
 ## Flujos desde los ViewModels
@@ -55,7 +59,7 @@ El mapa no registra `@Provides`, `@Binds` ni dependencias con `@Inject`.
 
 ## Violaciones de capas
 
-No se encontraron violaciones. Se revisaron todas las aristas entre capas con estas reglas: Presentation no depende de Data, Domain no depende de Presentation ni de Data, Data no depende de Presentation. La capa DI está exenta.
+No se encontraron violaciones. Se revisaron todas las aristas entre clases del módulo contra estas dependencias prohibidas: Data → Presentation, Domain → Data, Domain → Presentation, Presentation → Data.
 
 ## Puntos de entrada
 

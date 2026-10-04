@@ -1,0 +1,18 @@
+[versions]
+retrofit = "2.11.0"
+lifecycle = "2.8.7"
+okhttp = { strictly = "4.12.0" }
+
+[libraries]
+retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+androidx-lifecycle-viewmodel = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
+compose-bom = "androidx.compose:compose-bom:2024.10.00"
+compose-ui = { module = "androidx.compose.ui:ui" }
+
+[bundles]
+network = ["retrofit", "okhttp"]
+
+[plugins]
+android-library = { id = "com.android.library", version = "8.7.0" }
+kotlin-android = "org.jetbrains.kotlin.android:2.0.21"
