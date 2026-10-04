@@ -79,12 +79,26 @@ DESCRIBE_TIMEOUT = 300  # seconds
 
 # Architectural role (heuristic): first by annotation, then supertype, then name.
 ROLE_BY_ANNOTATION = {"HiltViewModel": "viewmodel", "Dao": "dao", "Entity": "entity",
-                      "Database": "database", "Module": "di_module"}
+                      "Database": "database", "Module": "di_module",
+                      "Composable": "composable", "AndroidEntryPoint": "android_entry",
+                      "Provides": "di_module", "Binds": "di_module", "InstallIn": "di_module",
+                      "TypeConverter": "type_converter", "Query": "dao",
+                      "Insert": "dao", "Update": "dao", "Delete": "dao",
+                      "SerializedName": "model", "Json": "model", "JsonClass": "model",
+                      "Serializable": "model", "Parcelize": "model",
+                      "BindingAdapter": "binding_adapter", "Preview": "composable"}
 ROLE_BY_SUPERTYPE = {"ViewModel": "viewmodel", "Activity": "activity", "Fragment": "fragment",
                      "Service": "service", "BroadcastReceiver": "receiver", "ContentProvider": "provider",
-                     "Worker": "worker", "Application": "application", "RoomDatabase": "database"}
+                     "Worker": "worker", "Application": "application", "RoomDatabase": "database",
+                     "ListAdapter": "adapter", "RecyclerView.Adapter": "adapter",
+                     "PagingSource": "datasource", "RemoteMediator": "datasource",
+                     "TypeConverter": "type_converter"}
 ROLE_BY_NAME = {"Repository": "repository", "RepositoryImpl": "repository", "UseCase": "usecase",
-                "Interactor": "usecase", "DataSource": "datasource"}
+                "Interactor": "usecase", "DataSource": "datasource",
+                "Mapper": "mapper", "Converter": "mapper",
+                "Router": "navigator", "Navigator": "navigator", "Coordinator": "navigator",
+                "Adapter": "adapter", "ViewHolder": "viewholder",
+                "State": "ui_state", "UiState": "ui_state", "UiEvent": "ui_event"}
 HTTP_VERBS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "HTTP"}
 
 # Travels inside the JSON so whoever consumes it does not have to guess the semantics.

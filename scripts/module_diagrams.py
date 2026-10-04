@@ -26,11 +26,27 @@ from collections import defaultdict, deque
 from pathlib import Path
 
 LAYERS = ["Presentation", "Domain", "Data", "DI", "Other"]
-LAYER_BY_SEGMENT = {"ui": "Presentation", "presentation": "Presentation", "domain": "Domain",
-                    "data": "Data", "di": "DI"}
+LAYER_BY_SEGMENT = {
+    "ui": "Presentation", "presentation": "Presentation", "view": "Presentation",
+    "screen": "Presentation", "compose": "Presentation", "fragment": "Presentation",
+    "activity": "Presentation", "adapter": "Presentation", "widget": "Presentation",
+    "viewmodel": "Presentation",
+    "domain": "Domain", "usecase": "Domain", "interactor": "Domain",
+    "data": "Data", "network": "Data", "remote": "Data", "api": "Data",
+    "local": "Data", "cache": "Data", "db": "Data", "database": "Data",
+    "datasource": "Data", "repository": "Data",
+    "di": "DI", "hilt": "DI", "injection": "DI",
+}
 LAYER_BY_ROLE = {"activity": "Presentation", "fragment": "Presentation", "composable": "Presentation",
-                 "viewmodel": "Presentation", "usecase": "Domain", "datasource": "Data",
-                 "api_service": "Data", "dao": "Data", "entity": "Data", "database": "Data",
+                 "viewmodel": "Presentation", "android_entry": "Presentation",
+                 "adapter": "Presentation", "viewholder": "Presentation",
+                 "binding_adapter": "Presentation",
+                 "ui_state": "Presentation", "ui_event": "Presentation",
+                 "navigator": "Presentation",
+                 "usecase": "Domain", "mapper": "Domain",
+                 "datasource": "Data", "api_service": "Data", "dao": "Data",
+                 "entity": "Data", "database": "Data", "type_converter": "Data",
+                 "model": "Data",
                  "di_module": "DI"}
 # (source layer, target layer) pairs that break the dependency rule. DI is exempt.
 FORBIDDEN = {("Presentation", "Data"), ("Domain", "Presentation"), ("Domain", "Data"),
