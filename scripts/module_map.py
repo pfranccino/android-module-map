@@ -101,6 +101,39 @@ ROLE_BY_NAME = {"Repository": "repository", "RepositoryImpl": "repository", "Use
                 "State": "ui_state", "UiState": "ui_state", "UiEvent": "ui_event"}
 HTTP_VERBS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "HTTP"}
 
+# Layer-exclusive import prefixes: libraries that only one layer uses.
+LAYER_BY_IMPORT = {
+    "retrofit2.": "Data", "okhttp3.": "Data", "com.squareup.okhttp3.": "Data",
+    "androidx.room.": "Data", "io.realm.": "Data",
+    "app.cash.sqldelight.": "Data", "com.squareup.sqldelight.": "Data",
+    "com.google.firebase.firestore.": "Data", "com.google.firebase.database.": "Data",
+    "io.ktor.client.": "Data",
+    "androidx.compose.": "Presentation", "android.view.": "Presentation",
+    "android.widget.": "Presentation", "android.app.Activity": "Presentation",
+    "androidx.fragment.": "Presentation", "androidx.recyclerview.": "Presentation",
+    "androidx.navigation.": "Presentation", "androidx.viewpager": "Presentation",
+    "dagger.Module": "DI", "dagger.Provides": "DI", "dagger.Binds": "DI",
+    "dagger.hilt.": "DI", "dagger.multibindings.": "DI",
+}
+
+
+def layer_from_imports(imports):
+    """Infer layer from file imports using library prefixes exclusive to one layer."""
+    votes = {}
+    for fqn in imports.values():
+        for prefix, layer in LAYER_BY_IMPORT.items():
+            if fqn.startswith(prefix):
+                votes[layer] = votes.get(layer, 0) + 1
+                break
+    if not votes:
+        return None
+    best = max(votes, key=votes.get)
+    total = sum(votes.values())
+    if votes[best] / total >= 0.6:
+        return best
+    return None
+
+
 # Travels inside the JSON so whoever consumes it does not have to guess the semantics.
 LEGEND = {
     "edge_kinds": {
@@ -482,6 +515,10 @@ class ModuleMap:
         if body:
             self.members(node, body, file)
         node["role"] = role_of(node)
+        if not node["role"]:
+            hint = layer_from_imports(self.files.get(file, {}).get("imports", {}))
+            if hint:
+                node["layer_hint"] = hint
 
     def members(self, node, body, file, static=False):
         """Members are stored inside their class node; nested types are nodes of their own."""

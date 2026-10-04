@@ -69,16 +69,48 @@ class Map:
             if e["kind"] == "implements" and e["from"] in self.nodes:
                 self.implementers[e["to"]].append(e["from"])
         self.layers = {node_id: self.layer(node) for node_id, node in self.nodes.items()}
+        self._propagate_layers()
+
+    def _propagate_layers(self):
+        """Infer layer for 'Other' nodes from their already-classified neighbors."""
+        neighbors = defaultdict(list)
+        for e in self.edges:
+            if e["from"] in self.nodes and e["to"] in self.nodes:
+                neighbors[e["from"]].append(e["to"])
+                neighbors[e["to"]].append(e["from"])
+        changed = True
+        while changed:
+            changed = False
+            for node_id, current in list(self.layers.items()):
+                if current != "Other":
+                    continue
+                votes = {}
+                for neighbor in neighbors.get(node_id, []):
+                    n_layer = self.layers.get(neighbor)
+                    if n_layer and n_layer != "Other":
+                        votes[n_layer] = votes.get(n_layer, 0) + 1
+                if not votes:
+                    continue
+                total = sum(votes.values())
+                best = max(votes, key=votes.get)
+                if votes[best] / total >= 0.7 and total >= 2:
+                    self.layers[node_id] = best
+                    changed = True
 
     def layer(self, node):
-        """Layer by package segment (the one closest to the class) and, failing that, by role."""
+        """Layer by package segment, role, import-based hint, or 'Other' as last resort."""
         packages = [s for s in node["id"].split(".")[:-1] if s[:1].islower()]
         for segment in reversed(packages):
             if segment in LAYER_BY_SEGMENT:
                 return LAYER_BY_SEGMENT[segment]
         if node.get("role") == "repository":
             return "Domain" if node["kind"] == "interface" else "Data"
-        return LAYER_BY_ROLE.get(node.get("role"), "Other")
+        role_layer = LAYER_BY_ROLE.get(node.get("role"))
+        if role_layer:
+            return role_layer
+        if node.get("layer_hint"):
+            return node["layer_hint"]
+        return "Other"
 
     def label(self, node_id, _seen=None):
         node = self.nodes.get(node_id) or self.externals.get(node_id) or {"name": node_id}
