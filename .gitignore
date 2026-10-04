@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 .venv/
 .DS_Store
+
+# Claude Code
+.claude/
+.agents/
+skills-lock.json
+brag-output/
