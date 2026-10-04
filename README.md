@@ -1,18 +1,36 @@
-# android-module-map
+<div align="center">
 
-Automatically generate architecture diagrams and analysis documents for Kotlin/Android Gradle
-modules. Two Python scripts turn your source code into layered architecture diagrams, dependency
-graphs, flow charts, and a structured audit — without running Gradle, without a model, and with
-deterministic output every time.
+# 🏗️ android-module-map
 
-**The problem:** understanding how an Android module is wired — which layers talk to which, where
-the Hilt bindings land, what calls what — usually means reading every file or drawing diagrams by
-hand. This tool reads the code and draws them for you.
+**Turn your Kotlin/Android modules into architecture diagrams — automatically.**
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white)](https://python.org)
+[![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen?logo=pytest&logoColor=white)](#testing)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Two scripts. No Gradle build. No AI model. Same input → same output, every time.
+
+[Quick Start](#-quick-start) · [Features](#-features) · [How It Works](#-how-it-works) · [Examples](examples/)
+
+</div>
+
+---
+
+Understanding how an Android module is wired — which layers talk to which, where
+Hilt bindings land, what calls what — usually means reading every file or drawing
+diagrams by hand. **This tool reads the code and draws them for you.**
 
 ```
-module_map.py        source code  →  <module>.module-map.json
-module_diagrams.py   map JSON     →  <module>.md  (Mermaid diagrams + analysis)
+module_map.py        source code  →  .module-map.json
+module_diagrams.py   map JSON     →  .md  (Mermaid diagrams + analysis)
 ```
+
+<details>
+<summary><b>📊 See a generated diagram</b> (click to expand)</summary>
+
+<br>
+
+> Generated from the synthetic project in [`examples/`](examples/)
 
 ```mermaid
 graph TD
@@ -49,44 +67,42 @@ graph TD
     n0 -.implementado por.-> n1
 ```
 
-<sup>Generated from the synthetic project in <a href="examples/">examples/</a>.</sup>
+</details>
 
-## Features
+---
 
-- **Layered architecture diagrams** — automatically groups classes into Presentation, Domain,
-  Data, and DI layers by package names, annotations, and roles
-- **Flow and sequence diagrams** — traces ViewModel → use case → repository → API call chains
-  with AST-verified receiver types
-- **Hilt/Dagger injection graph** — maps `@Provides`, `@Binds`, `@Inject` constructors, and
-  field injection across the module
-- **Layer violation detection** — flags forbidden dependencies (e.g., Domain → Data) with
-  `file:line` evidence
-- **Cross-module dependency tracking** — shows which modules use this one and which it depends
-  on, matching Gradle declarations against actual code usage
-- **Deterministic output** — same code always produces the same map and diagrams, so it works
-  in CI, code review, or as a Claude Code skill
-- **Zero-config start** — auto-installs its own tree-sitter environment on first run; no
-  manual dependency setup needed
+## ✨ Features
 
-## Quick Start
+| | Feature | Description |
+|---|---|---|
+| 🧱 | **Layered architecture** | Groups classes into Presentation, Domain, Data, and DI by package, annotation, and role |
+| 🔀 | **Flow diagrams** | Traces ViewModel → use case → repository → API with AST-verified receivers |
+| 📐 | **Sequence diagrams** | Step-by-step call sequence for any ViewModel function |
+| 💉 | **Hilt/Dagger graph** | Maps `@Provides`, `@Binds`, `@Inject` across the module |
+| 🚨 | **Violation detection** | Flags forbidden layer dependencies with `file:line` evidence |
+| 🔗 | **Cross-module tracking** | Matches Gradle declarations against actual code usage |
+| ♻️ | **Deterministic** | Same code → same output. Works in CI, code review, or as a Claude Code skill |
+| ⚡ | **Zero config** | Auto-installs tree-sitter on first run — nothing to set up |
 
-> **Requires Python 3.10+.** Works on Linux, macOS, and Windows.
+---
 
-Clone the repo (or add it as a skill — see [Claude Code skill](#claude-code-skill) below), then
-run both scripts from the root of your Android project:
+## 🚀 Quick Start
+
+> **Requires Python 3.10+** · Works on Linux, macOS, and Windows
 
 ```bash
-# Step 1: Generate the JSON map
+# 1️⃣ Generate the JSON map
 python3 path/to/scripts/module_map.py feature/login
 
-# Step 2: Generate diagrams and analysis
+# 2️⃣ Generate diagrams and analysis
 python3 path/to/scripts/module_diagrams.py feature/login
 ```
 
-On first run, `module_map.py` creates a virtual environment in `~/.cache/module-map/venv` and
-installs `tree-sitter` there (requires network). Subsequent runs start instantly.
+On first run, `module_map.py` creates a venv in `~/.cache/module-map/venv` and installs
+`tree-sitter` (requires network once). After that, it starts instantly.
 
-**Expected output:**
+<details>
+<summary><b>See expected output</b></summary>
 
 ```
 [module_map +  0.0s] :feature:login: parseando 6 archivos...
@@ -97,8 +113,6 @@ installs `tree-sitter` there (requires network). Subsequent runs start instantly
 generado: feature/login/docs/architecture/feature-login.md
 ```
 
-**What gets written:**
-
 ```
 feature/login/docs/architecture/
 ├── feature-login.module-map.json   ← structured map (nodes + edges)
@@ -106,146 +120,181 @@ feature/login/docs/architecture/
 └── feature-login.classes.md        ← only when --only is used
 ```
 
-### Map multiple modules at once
+</details>
+
+### Multiple modules
 
 ```bash
-# Every module inside a directory (or . for the whole project)
 python3 path/to/scripts/module_map.py features
 python3 path/to/scripts/module_diagrams.py features
 ```
 
-With several modules, `module_diagrams.py` also writes an `index.md` with the Gradle dependency
-graph between them.
+Generates an `index.md` with the Gradle dependency graph across all modules.
 
-### Generate a single section
+### Single section
 
 ```bash
 python3 path/to/scripts/module_diagrams.py features --module login --only classes
 ```
 
-## What You Get
+---
 
-Each module document can contain these sections (all generated by default; `--only` selects a
-subset):
+## 📄 What You Get
 
-| Key | Section |
-|---|---|
-| `layers` | Layered architecture diagram (Presentation, Domain, Data, DI) |
-| `flows` | Flows from the ViewModels: ViewModel → function → use case → repository → API |
-| `sequence` | Sequence diagram of one flow |
-| `modules` | Module dependencies: declared in Gradle, and modules that use this one |
-| `hilt` | Hilt dependency injection: providers, bindings and consumers |
-| `classes` | Table of every class, interface and object with kind, layer, role and KDoc |
-| `violations` | Layer violations, with `file:line` evidence |
-| `entries` | Entry points: Manifest components and usages from other modules |
-| `external` | External dependencies, by module and by library |
-| `review` | Edges to review: corrections, low-confidence edges, warnings, discarded count |
+Each document can include these sections — all generated by default, `--only` picks a subset:
 
-A subset is written to its own file (`<module>.<sections>.md`), so it never overwrites the full
-document.
+| Key | Section | What it shows |
+|:---:|---|---|
+| `layers` | Architecture diagram | Classes grouped by layer with dependency arrows |
+| `flows` | Flow diagram | ViewModel → use case → repository → API chains |
+| `sequence` | Sequence diagram | Step-by-step call trace for one flow |
+| `modules` | Module graph | Gradle dependencies + cross-module usage |
+| `hilt` | DI diagram | Providers, bindings, and injection consumers |
+| `classes` | Class table | Every type with kind, layer, role, and KDoc |
+| `violations` | Layer violations | Forbidden dependencies with file:line evidence |
+| `entries` | Entry points | Manifest components + usages from other modules |
+| `external` | External deps | Dependencies by module and by library |
+| `review` | Review edges | Corrections, low-confidence links, warnings |
 
-## Requirements
+> Subsets are written to `<module>.<sections>.md` — the full document is never overwritten.
 
-- **Python 3.10+.** Nothing to install by hand: `module_map.py` auto-bootstraps its
-  dependencies (`tree-sitter==0.26.0`, `tree-sitter-kotlin==1.1.0`). `module_diagrams.py` uses
-  only the standard library.
-- **[codegraph](https://www.npmjs.com/package/@colbymchenry/codegraph)** (optional, tested with
-  1.6.1). Provides calls, instantiations and references. Run `codegraph init` once at the root
-  of the Android project. Without it the map still has the structure, but the flow and sequence
-  diagrams will be empty.
-- **Android CLI** (optional, off by default). `--android-cli` runs `android describe` and
-  attaches build metadata. It runs Gradle, which can take minutes.
+---
 
-## Options
+## 📋 Requirements
 
-**`module_map.py <dir>`** — `<dir>` is a module, a package inside a module, or a directory
-containing several modules.
+| Dependency | Required | Notes |
+|---|:---:|---|
+| **Python 3.10+** | ✅ | `module_map.py` auto-bootstraps `tree-sitter` in a dedicated venv |
+| **[codegraph](https://www.npmjs.com/package/@colbymchenry/codegraph)** | ❌ | Adds calls, instantiations, references. Run `codegraph init` once. Without it: no flow/sequence diagrams |
+| **Android CLI** | ❌ | `--android-cli` attaches Gradle build metadata. Slow (runs Gradle) |
 
-| Option | Meaning |
-|---|---|
-| `-o, --output` | Directory to collect the maps in, instead of inside each module. With a single module it can also be a `.json` file |
-| `--no-codegraph` | Do not read the codegraph index |
-| `--android-cli` | Run `android describe` and attach its build metadata |
+---
 
-**`module_diagrams.py <path>`** — `<path>` is a module, a directory of modules, a directory of
-maps, or one map JSON.
+## ⚙️ Options
+
+<details>
+<summary><b>module_map.py</b> <code>&lt;dir&gt;</code></summary>
+
+`<dir>` is a module, a package inside a module, or a directory containing several modules.
 
 | Option | Meaning |
 |---|---|
-| `--only layers,flows` | Generate only these sections, in `<module>.<sections>.md` |
-| `--module engine` | With several modules, process only that one |
-| `--flow Class.function` | Flow for the sequence diagram (one module). Defaults to the ViewModel function with the longest call chain |
-| `--sections` | List the available section keys and exit |
-| `-o, --output` | Output directory instead of next to each map. With one module it can also be a `.md` file |
+| `-o, --output` | Collect maps in this directory (or a `.json` file for one module) |
+| `--no-codegraph` | Skip the codegraph index |
+| `--android-cli` | Run `android describe` and attach build metadata |
 
-To collect everything in one directory, pass `-o <directory>` to `module_map.py` and give that
-directory to `module_diagrams.py`.
+</details>
 
-## How It Works
+<details>
+<summary><b>module_diagrams.py</b> <code>&lt;path&gt;</code></summary>
 
-`module_map.py` combines three sources:
+`<path>` is a module, a directory of modules, a directory of maps, or one map JSON.
 
-1. **AST** (tree-sitter-kotlin): declarations, signatures, KDoc, annotations, inheritance,
-   constructor dependencies, Hilt bindings and types used in signatures. Each class gets a role
-   (`viewmodel`, `composable`, `repository`, `usecase`, `dao`, `api_service`, ...) inferred from
-   annotations, supertypes, name suffixes, and import-based layer hints.
-2. **codegraph**: calls, instantiations and references, including cross-module ones. The script
-   reads `.codegraph/codegraph.db` directly and lifts each method to the class that contains it.
-3. **Gradle and AndroidManifest**: module type, declared dependencies and components, read from
-   the files without running Gradle.
+| Option | Meaning |
+|---|---|
+| `--only layers,flows` | Generate only these sections |
+| `--module engine` | Process only this module from a multi-module directory |
+| `--flow Class.function` | Pick the flow for the sequence diagram |
+| `--sections` | List available section keys and exit |
+| `-o, --output` | Output directory (or `.md` file for one module) |
 
-### Edge validation
+</details>
 
-codegraph resolves symbols by name, so a call to `isAuthorized()` can be linked to an unrelated
-namesake. The file that makes the call settles the target, in this order:
+---
 
-1. the declared type of the receiver (`repo.load()`, or `useCase()` through `operator invoke`);
-2. the import of the referenced name, which overrides codegraph's target when they differ;
-3. an import of the target class itself;
-4. the target being in the same package or covered by a star import.
+## 🔍 How It Works
 
-An edge with none of these is discarded. The result favors a missing arrow over a false one.
+`module_map.py` combines three sources into a single JSON map:
 
-### The JSON map
+```mermaid
+graph LR
+    A["🌳 AST<br/><i>tree-sitter-kotlin</i>"] --> D["📦 module-map.json"]
+    B["📊 codegraph<br/><i>.codegraph/codegraph.db</i>"] --> D
+    C["📝 Gradle + Manifest<br/><i>build.gradle.kts</i>"] --> D
+    D --> E["📄 Mermaid diagrams<br/><i>module_diagrams.py</i>"]
+```
+
+| Source | What it provides |
+|---|---|
+| **AST** | Declarations, signatures, KDoc, annotations, inheritance, Hilt bindings, roles |
+| **codegraph** | Calls, instantiations, references (including cross-module) |
+| **Gradle + Manifest** | Module type, dependencies, components — no Gradle execution needed |
+
+<details>
+<summary><b>Edge validation</b> — how false positives are filtered</summary>
+
+<br>
+
+codegraph resolves by name, so `isAuthorized()` can match an unrelated namesake. Each edge is
+validated against the calling file:
+
+1. **Receiver type** — `repo.load()` resolves via the declared type of `repo`
+2. **Import match** — the import overrides codegraph's target when they differ
+3. **Target import** — an import of the target class itself
+4. **Same package** — target is in the caller's package or covered by a star import
+
+No match → edge discarded. **Missing arrow > false arrow.**
+
+</details>
+
+<details>
+<summary><b>JSON map structure</b></summary>
+
+<br>
 
 One node or edge per line, so `grep` works on it.
 
 | Key | Content |
 |---|---|
-| `module` | Gradle path, type, namespace, plugins, declared dependencies, Manifest |
-| `nodes` | Declarations: id (FQN), kind, role, file, lines, KDoc, constructor, properties, functions |
-| `external_nodes` | Symbols outside the module (`origin: project` or `library`) |
-| `edges` | `extends`, `implements`, `depends_on`, `provides`, `uses_type`, `calls`, `instantiates`, `references`, each with `provenance`, `weight` and `details` |
-| `sources`, `warnings` | Which sources were used, and files that parsed only partially |
+| `module` | Gradle path, type, namespace, plugins, dependencies, Manifest |
+| `nodes` | Declarations: FQN, kind, role, file, lines, KDoc, constructor, functions |
+| `external_nodes` | Symbols outside the module (`project` or `library`) |
+| `edges` | Typed relationships with `provenance`, `weight`, and `details` |
 | `legend` | Meaning of each edge kind and provenance |
 
-### Layers and violations
+</details>
 
-`module_diagrams.py` assigns a layer by package segment (`ui`, `presentation`, `domain`, `data`,
-`di`) and, failing that, by role or import-based heuristics. The rules are constants at the top
-of the script (`LAYER_BY_SEGMENT`, `LAYER_BY_ROLE`, `FORBIDDEN`); edit them if your packages use
-other names.
+<details>
+<summary><b>Layer assignment</b></summary>
 
-## Testing
+<br>
 
-Run the test suite (111 tests covering AST parsing, diagram generation, end-to-end pipeline,
-and edge cases):
+Layers are assigned by package segment (`ui` → Presentation, `domain` → Domain, `data` → Data,
+`di` → DI), then by role, then by import heuristics. Customize by editing `LAYER_BY_SEGMENT`,
+`LAYER_BY_ROLE`, and `FORBIDDEN` at the top of `module_diagrams.py`.
+
+</details>
+
+---
+
+## 🧪 Testing
 
 ```bash
 python tests/test_module_map.py
 ```
 
-Expected output:
+<details>
+<summary><b>111 tests</b> covering AST parsing, diagram generation, E2E pipeline, and edge cases</summary>
 
 ```
 === module_map.py (AST-only, synthetic fixtures) ===
   PASS  output file created
   PASS  schema is module-map/1
+  PASS  module path is :feature:login
+  PASS  node LoginViewModel exists
+  PASS  AuthRepositoryImpl implements AuthRepository
+  ...
+
+=== module_diagrams.py (single module, example map) ===
+  PASS  has mermaid block
+  PASS  has flows section
+  PASS  no violations detected
   ...
 
 === End-to-end: module_map.py -> module_diagrams.py ===
   PASS  map JSON created
   PASS  diagram doc created
+  PASS  e2e: multiple mermaid diagrams
   ...
 
 ==================================================
@@ -253,40 +302,54 @@ Expected output:
 ==================================================
 ```
 
-## Claude Code Skill
+</details>
 
-This repository is laid out as a skill: `SKILL.md` at the root with the scripts next to it.
-To use it, clone it into the skills directory of your project:
+---
+
+## 🤖 Claude Code Skill
+
+Use this as a [Claude Code skill](https://docs.anthropic.com/en/docs/claude-code) by cloning
+into your project's skills directory:
 
 ```bash
 git clone https://github.com/pfranccino/android-module-map.git .claude/skills/module-map
 ```
 
-The skill runs both scripts and then does the two things a script cannot: it checks the edges
-listed under "review" against the source, and describes the classes that have no KDoc.
+The skill runs both scripts, then goes further: it verifies edges listed under "review" against
+the source and describes classes missing KDoc.
 
-## Limitations
+---
 
-- **Syntactic only.** Types that Kotlin infers are unknown, so a property without a declared
-  type has no type in the map.
-- **Kotlin only.** Java classes appear through codegraph with minimal information.
-- **No test source sets.** Test code is excluded by design.
-- **Calls require codegraph.** Without it, flow and sequence diagrams are empty.
-- **Gradle via regex.** Dependencies added by convention plugins or type-safe project accessors
-  with camelCase names may not be detected.
-- **Not extracted:** navigation routes, UI state transitions, and `Flow` collectors.
-- **Spanish output.** CLI messages, the JSON legend, and generated documents are in Spanish.
+## ⚠️ Limitations
 
-## Contributing
+> These are known boundaries — not bugs.
 
-Contributions are welcome. Please open an issue before submitting large changes.
+- **Syntactic only** — Kotlin-inferred types are invisible to the AST
+- **Kotlin only** — Java classes appear via codegraph with minimal info
+- **No test sources** — test code is excluded by design
+- **Calls need codegraph** — without it, flow and sequence diagrams are empty
+- **Gradle via regex** — convention plugins and camelCase accessors may be missed
+- **Not extracted** — navigation routes, UI state transitions, `Flow` collectors
+- **Spanish output** — CLI messages, JSON legend, and generated docs are in Spanish
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! Please open an issue before submitting large changes.
 
 ```bash
 git clone https://github.com/pfranccino/android-module-map.git
 cd android-module-map
-python tests/test_module_map.py   # runs the full test suite
+python tests/test_module_map.py   # run the full test suite
 ```
 
-## License
+---
 
-MIT
+<div align="center">
+
+**[MIT License](LICENSE)**
+
+Made for Android developers who'd rather read diagrams than grep through modules.
+
+</div>
