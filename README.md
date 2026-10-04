@@ -4,13 +4,13 @@
 
 **Turn your Kotlin/Android modules into architecture diagrams — automatically.**
 
+[![CI](https://github.com/pfranccino/android-module-map/actions/workflows/ci.yml/badge.svg)](https://github.com/pfranccino/android-module-map/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen?logo=pytest&logoColor=white)](#testing)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Two scripts. No Gradle build. No AI model. Same input → same output, every time.
 
-[Quick Start](#-quick-start) · [Features](#-features) · [How It Works](#-how-it-works) · [Examples](examples/)
+[Quick Start](#-quick-start) · [Features](#-features) · [Configuration](#%EF%B8%8F-configuration) · [How It Works](#-how-it-works) · [Examples](examples/)
 
 </div>
 
@@ -30,7 +30,7 @@ module_diagrams.py   map JSON     →  .md  (Mermaid diagrams + analysis)
 
 <br>
 
-> Generated from the synthetic project in [`examples/`](examples/)
+> Generated from the synthetic project in [`examples/`](examples/) with `--lang en`
 
 ```mermaid
 graph TD
@@ -52,7 +52,7 @@ graph TD
     subgraph DI
         n9["LoginModule"]
     end
-    subgraph ext_modules["Otros módulos"]
+    subgraph ext_modules["Other modules"]
         n10["ApiClient<br/>:core:network"]
     end
     n1 --> n10
@@ -64,7 +64,17 @@ graph TD
     n5 --> n6
     n6 --> n0
     n9 --> n10
-    n0 -.implementado por.-> n1
+    n0 -.implemented by.-> n1
+    classDef layerPresentation fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    class n2,n3,n4,n5 layerPresentation
+    classDef layerDomain fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    class n0,n6 layerDomain
+    classDef layerData fill:#fef3c7,stroke:#d97706,color:#0f172a
+    class n7,n1,n8 layerData
+    classDef layerDI fill:#f3e8ff,stroke:#9333ea,color:#0f172a
+    class n9 layerDI
+    classDef external fill:#ffffff,stroke:#94a3b8,stroke-dasharray:4,color:#334155
+    class n10 external
 ```
 
 </details>
@@ -75,14 +85,17 @@ graph TD
 
 | | Feature | Description |
 |---|---|---|
-| 🧱 | **Layered architecture** | Groups classes into Presentation, Domain, Data, and DI by package, annotation, and role |
+| 🧱 | **Layered architecture** | Groups classes into Presentation, Domain, Data, and DI by package, annotation, and role — one color per layer |
 | 🔀 | **Flow diagrams** | Traces ViewModel → use case → repository → API with AST-verified receivers |
 | 📐 | **Sequence diagrams** | Step-by-step call sequence for any ViewModel function |
 | 💉 | **Hilt/Dagger graph** | Maps `@Provides`, `@Binds`, `@Inject` across the module |
 | 🚨 | **Violation detection** | Flags forbidden layer dependencies with `file:line` evidence |
 | 🔗 | **Cross-module tracking** | Matches Gradle declarations against actual code usage |
+| 📚 | **Version catalogs** | Resolves `libs.*` notations from `gradle/libs.versions.toml` to real coordinates |
+| 🗺️ | **Scales to big modules** | Above 40 drawn nodes the layer diagram switches to one box per package |
+| 🌐 | **English or Spanish** | `--lang en` or `--lang es` for documents, messages and the map legend |
+| ⚙️ | **Configurable rules** | Layer names and forbidden dependencies live in `.module-map.toml`, not in the code |
 | ♻️ | **Deterministic** | Same code → same output. Works in CI, code review, or as a Claude Code skill |
-| ⚡ | **Zero config** | Auto-installs tree-sitter on first run — nothing to set up |
 
 ---
 
@@ -90,27 +103,40 @@ graph TD
 
 > **Requires Python 3.10+** · Works on Linux, macOS, and Windows
 
-```bash
-# 1️⃣ Generate the JSON map
-python3 path/to/scripts/module_map.py feature/login
+**Option A — install the commands** (recommended):
 
-# 2️⃣ Generate diagrams and analysis
+```bash
+pipx install git+https://github.com/pfranccino/android-module-map
+
+# from the root of your Android project
+module-map feature/login
+module-diagrams feature/login
+```
+
+**Option B — run the scripts from a clone**, with nothing installed:
+
+```bash
+python3 path/to/scripts/module_map.py feature/login
 python3 path/to/scripts/module_diagrams.py feature/login
 ```
 
-On first run, `module_map.py` creates a venv in `~/.cache/module-map/venv` and installs
-`tree-sitter` (requires network once). After that, it starts instantly.
+On Windows, use `python` instead of `python3`. In this mode `module_map.py` creates its own venv in
+`~/.cache/module-map/venv` the first time it runs and installs `tree-sitter` there (needs network
+once).
+
+Output is in Spanish by default. Add `--lang en` to both commands (or set `MODULE_MAP_LANG=en`, or
+`lang = "en"` in [`.module-map.toml`](#%EF%B8%8F-configuration)) to get it in English.
 
 <details>
 <summary><b>See expected output</b></summary>
 
 ```
-[module_map +  0.0s] :feature:login: parseando 6 archivos...
-[module_map +  0.1s] feature/login/docs/architecture/feature-login.module-map.json: 19 nodos, 5 externos, 29 aristas, 0 avisos
+[module_map +  0.0s] :feature:login: parsing 6 files...
+[module_map +  0.1s] feature/login/docs/architecture/feature-login.module-map.json: 19 nodes, 5 externals, 29 edges, 0 warnings
 ```
 
 ```
-generado: feature/login/docs/architecture/feature-login.md
+generated: feature/login/docs/architecture/feature-login.md
 ```
 
 ```
@@ -125,8 +151,8 @@ feature/login/docs/architecture/
 ### Multiple modules
 
 ```bash
-python3 path/to/scripts/module_map.py features
-python3 path/to/scripts/module_diagrams.py features
+module-map features
+module-diagrams features
 ```
 
 Generates an `index.md` with the Gradle dependency graph across all modules.
@@ -134,7 +160,7 @@ Generates an `index.md` with the Gradle dependency graph across all modules.
 ### Single section
 
 ```bash
-python3 path/to/scripts/module_diagrams.py features --module login --only classes
+module-diagrams features --module login --only classes
 ```
 
 ---
@@ -145,7 +171,7 @@ Each document can include these sections — all generated by default, `--only` 
 
 | Key | Section | What it shows |
 |:---:|---|---|
-| `layers` | Architecture diagram | Classes grouped by layer with dependency arrows |
+| `layers` | Architecture diagram | Classes grouped by layer with dependency arrows (packages for large modules) |
 | `flows` | Flow diagram | ViewModel → use case → repository → API chains |
 | `sequence` | Sequence diagram | Step-by-step call trace for one flow |
 | `modules` | Module graph | Gradle dependencies + cross-module usage |
@@ -164,7 +190,7 @@ Each document can include these sections — all generated by default, `--only` 
 
 | Dependency | Required | Notes |
 |---|:---:|---|
-| **Python 3.10+** | ✅ | `module_map.py` auto-bootstraps `tree-sitter` in a dedicated venv |
+| **Python 3.10+** | ✅ | `pipx` installs `tree-sitter`; in script mode `module_map.py` installs it in its own venv |
 | **[codegraph](https://www.npmjs.com/package/@colbymchenry/codegraph)** | ❌ | Adds calls, instantiations, references. Run `codegraph init` once. Without it: no flow/sequence diagrams |
 | **Android CLI** | ❌ | `--android-cli` attaches Gradle build metadata. Slow (runs Gradle) |
 
@@ -173,7 +199,7 @@ Each document can include these sections — all generated by default, `--only` 
 ## ⚙️ Options
 
 <details>
-<summary><b>module_map.py</b> <code>&lt;dir&gt;</code></summary>
+<summary><b>module-map</b> / <code>module_map.py</code> <code>&lt;dir&gt;</code></summary>
 
 `<dir>` is a module, a package inside a module, or a directory containing several modules.
 
@@ -182,11 +208,13 @@ Each document can include these sections — all generated by default, `--only` 
 | `-o, --output` | Collect maps in this directory (or a `.json` file for one module) |
 | `--no-codegraph` | Skip the codegraph index |
 | `--android-cli` | Run `android describe` and attach build metadata |
+| `--lang es\|en` | Language of the messages and of the legend inside the map |
+| `--config` | Path to a `.module-map.toml` (looked up automatically otherwise) |
 
 </details>
 
 <details>
-<summary><b>module_diagrams.py</b> <code>&lt;path&gt;</code></summary>
+<summary><b>module-diagrams</b> / <code>module_diagrams.py</code> <code>&lt;path&gt;</code></summary>
 
 `<path>` is a module, a directory of modules, a directory of maps, or one map JSON.
 
@@ -197,8 +225,40 @@ Each document can include these sections — all generated by default, `--only` 
 | `--flow Class.function` | Pick the flow for the sequence diagram |
 | `--sections` | List available section keys and exit |
 | `-o, --output` | Output directory (or `.md` file for one module) |
+| `--lang es\|en` | Language of the document and the messages |
+| `--config` | Path to a `.module-map.toml` (looked up automatically otherwise) |
 
 </details>
+
+---
+
+## 🛠️ Configuration
+
+Put a `.module-map.toml` at the root of your Android project (next to `settings.gradle.kts`). Both
+commands find it by walking up from the path you give them. Every key is optional:
+
+```toml
+lang = "en"                  # es | en
+
+[layers]
+readable_limit = 60          # above this many nodes, the layer diagram is drawn by package
+forbidden = [                # replaces the default rules entirely
+    ["Presentation", "Data"],
+    ["Domain", "Presentation"],
+    ["Domain", "Data"],
+]
+
+[layers.by_segment]          # merged over the defaults: package segment -> layer
+feature = "Presentation"
+api = "Other"                # a default (api -> Data) can be overridden too
+
+[layers.by_role]             # merged over the defaults: role -> layer
+mapper = "Data"
+```
+
+Layers are `Presentation`, `Domain`, `Data`, `DI` and `Other`. An unknown key or layer stops the
+run with a message instead of being ignored. Language precedence: `--lang`, then
+`MODULE_MAP_LANG`, then `lang` in the file, then Spanish.
 
 ---
 
@@ -210,7 +270,7 @@ Each document can include these sections — all generated by default, `--only` 
 graph LR
     A["🌳 AST<br/><i>tree-sitter-kotlin</i>"] --> D["📦 module-map.json"]
     B["📊 codegraph<br/><i>.codegraph/codegraph.db</i>"] --> D
-    C["📝 Gradle + Manifest<br/><i>build.gradle.kts</i>"] --> D
+    C["📝 Gradle + Manifest<br/><i>build.gradle.kts, libs.versions.toml</i>"] --> D
     D --> E["📄 Mermaid diagrams<br/><i>module_diagrams.py</i>"]
 ```
 
@@ -218,7 +278,7 @@ graph LR
 |---|---|
 | **AST** | Declarations, signatures, KDoc, annotations, inheritance, Hilt bindings, roles |
 | **codegraph** | Calls, instantiations, references (including cross-module) |
-| **Gradle + Manifest** | Module type, dependencies, components — no Gradle execution needed |
+| **Gradle + Manifest** | Module type, dependencies (with `libs.*` resolved through the version catalog), components — no Gradle execution needed |
 
 <details>
 <summary><b>Edge validation</b> — how false positives are filtered</summary>
@@ -246,11 +306,11 @@ One node or edge per line, so `grep` works on it.
 
 | Key | Content |
 |---|---|
-| `module` | Gradle path, type, namespace, plugins, dependencies, Manifest |
+| `module` | Gradle path, type, namespace, plugins, dependencies (`resolved` coordinates for `libs.*`), Manifest |
 | `nodes` | Declarations: FQN, kind, role, file, lines, KDoc, constructor, functions |
 | `external_nodes` | Symbols outside the module (`project` or `library`) |
 | `edges` | Typed relationships with `provenance`, `weight`, and `details` |
-| `legend` | Meaning of each edge kind and provenance |
+| `legend` | Meaning of each edge kind and provenance, in the chosen language |
 
 </details>
 
@@ -260,8 +320,8 @@ One node or edge per line, so `grep` works on it.
 <br>
 
 Layers are assigned by package segment (`ui` → Presentation, `domain` → Domain, `data` → Data,
-`di` → DI), then by role, then by import heuristics. Customize by editing `LAYER_BY_SEGMENT`,
-`LAYER_BY_ROLE`, and `FORBIDDEN` at the top of `module_diagrams.py`.
+`di` → DI), then by role, then by import heuristics, then by the layer of their neighbors.
+Change the mapping in [`.module-map.toml`](#%EF%B8%8F-configuration).
 
 </details>
 
@@ -270,39 +330,15 @@ Layers are assigned by package segment (`ui` → Presentation, `domain` → Doma
 ## 🧪 Testing
 
 ```bash
-python tests/test_module_map.py
+python -m venv .venv
+.venv/bin/pip install -e ".[test]"      # Windows: .venv\Scripts\pip
+.venv/bin/pytest                          # Windows: .venv\Scripts\pytest
 ```
 
-<details>
-<summary><b>111 tests</b> covering AST parsing, diagram generation, E2E pipeline, and edge cases</summary>
-
-```
-=== module_map.py (AST-only, synthetic fixtures) ===
-  PASS  output file created
-  PASS  schema is module-map/1
-  PASS  module path is :feature:login
-  PASS  node LoginViewModel exists
-  PASS  AuthRepositoryImpl implements AuthRepository
-  ...
-
-=== module_diagrams.py (single module, example map) ===
-  PASS  has mermaid block
-  PASS  has flows section
-  PASS  no violations detected
-  ...
-
-=== End-to-end: module_map.py -> module_diagrams.py ===
-  PASS  map JSON created
-  PASS  diagram doc created
-  PASS  e2e: multiple mermaid diagrams
-  ...
-
-==================================================
-  111 passed, 0 failed
-==================================================
-```
-
-</details>
+The suite covers the AST map, the codegraph edge validation (against a hand-built index), version
+catalogs, configuration, both languages, the CLI end to end, and checks that the committed
+[`examples/`](examples/) match what the script generates. CI runs it on Linux, macOS and Windows
+with Python 3.10 and 3.13, plus a run of the scripts with nothing installed.
 
 ---
 
@@ -328,20 +364,29 @@ the source and describes classes missing KDoc.
 - **Kotlin only** — Java classes appear via codegraph with minimal info
 - **No test sources** — test code is excluded by design
 - **Calls need codegraph** — without it, flow and sequence diagrams are empty
-- **Gradle via regex** — convention plugins and camelCase accessors may be missed
+- **Gradle via regex** — dependencies added by convention plugins are not seen; only the default
+  `gradle/libs.versions.toml` catalog is read
 - **Not extracted** — navigation routes, UI state transitions, `Flow` collectors
-- **Spanish output** — CLI messages, JSON legend, and generated docs are in Spanish
+- **Two languages** — Spanish (default) and English
 
 ---
 
 ## 🤝 Contributing
 
-Contributions welcome! Please open an issue before submitting large changes.
+Contributions welcome! Please open an issue before submitting large changes. `main` is protected:
+changes go through a pull request, and CI must pass.
 
 ```bash
 git clone https://github.com/pfranccino/android-module-map.git
 cd android-module-map
-python tests/test_module_map.py   # run the full test suite
+python -m venv .venv && .venv/bin/pip install -e ".[test]"
+.venv/bin/pytest
+```
+
+After changing `module_diagrams.py`, regenerate the examples so their test keeps passing:
+
+```bash
+python scripts/module_diagrams.py examples
 ```
 
 ---
