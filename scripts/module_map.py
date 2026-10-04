@@ -62,6 +62,7 @@ MESSAGES = {
         "catalog_no_toml": "no se leyó {file}: hace falta Python 3.11+ o el paquete tomli, así que las "
                            "dependencias libs.* quedan sin resolver",
         "catalog_invalid": "{file} no es TOML válido, las dependencias libs.* quedan sin resolver ({error})",
+        "dependency_unparsed": "{file}: dependencia sin interpretar, no aparece en el mapa: `{declaration}`",
         "parsing": "{module}: parseando {count} archivos...",
         "summary": "{nodes} nodos, {externals} externos, {edges} aristas, {warnings} avisos",
         "no_dir": "No existe el directorio: {path}",
@@ -82,6 +83,8 @@ MESSAGES = {
                        "con un solo módulo también puede ser el archivo .json de salida",
         "help_no_codegraph": "no leer el índice de codegraph",
         "help_android_cli": "ejecutar `android describe` y adjuntar sus metadatos de build (lanza Gradle, puede tardar)",
+        "help_no_timestamp": "no escribir generated_at, para que regenerar sin cambios no produzca diff "
+                             "(otra opción: definir SOURCE_DATE_EPOCH, que fija la fecha)",
         "help_lang": "idioma de los mensajes y de la leyenda del mapa; si no se indica, MODULE_MAP_LANG, "
                      "luego `lang` en .module-map.toml, luego es",
         "help_config": "archivo .module-map.toml; por defecto se busca desde el módulo hasta la raíz del proyecto",
@@ -102,6 +105,7 @@ MESSAGES = {
         "catalog_no_toml": "{file} was not read: it needs Python 3.11+ or the tomli package, so the libs.* "
                            "dependencies stay unresolved",
         "catalog_invalid": "{file} is not valid TOML, the libs.* dependencies stay unresolved ({error})",
+        "dependency_unparsed": "{file}: dependency not understood, it is left out of the map: `{declaration}`",
         "parsing": "{module}: parsing {count} files...",
         "summary": "{nodes} nodes, {externals} externals, {edges} edges, {warnings} warnings",
         "no_dir": "Directory not found: {path}",
@@ -122,6 +126,8 @@ MESSAGES = {
                        "<module>/docs/architecture); with a single module it can also be the output .json file",
         "help_no_codegraph": "do not read the codegraph index",
         "help_android_cli": "run `android describe` and attach its build metadata (runs Gradle, can be slow)",
+        "help_no_timestamp": "do not write generated_at, so that regenerating without changes produces no diff "
+                             "(alternatively, set SOURCE_DATE_EPOCH, which fixes the date)",
         "help_lang": "language of the messages and of the map legend; when absent, MODULE_MAP_LANG, "
                      "then `lang` in .module-map.toml, then es",
         "help_config": ".module-map.toml file; by default it is looked up from the module to the project root",
@@ -453,8 +459,82 @@ def gradle_module(path, root):
     return None, None
 
 
-DEPENDENCY_RE = re.compile(
-    r"(?:^|[{;])\s*(\w*(?:[iI]mplementation|[aA]pi|[cC]ompileOnly|[rR]untimeOnly|[kK]sp|[kK]apt))\s*\(?\s*(.+?)\)?\s*$", re.M)
+CONFIGURATION_RE = re.compile(
+    r"(?:^|[{;])[ \t]*(\w*(?:[iI]mplementation|[aA]pi|[cC]ompileOnly|[rR]untimeOnly|[kK]sp|[kK]apt))\b[ \t]*", re.M)
+# A notation the map can show as written: a string or an accessor (libs.x), optionally wrapped once: platform(...).
+NOTATION_RE = re.compile(r"""(?:\w+\(\s*)?(?:"[^"]*"|'[^']*'|[\w.]+)\s*\)?""")
+# group: 'g', name: 'a', version: 'v' in Groovy, group = "g", ... in the Kotlin DSL.
+NAMED_COORDINATE_RE = re.compile(r"""\b(group|name|version)\s*[:=]\s*["']([^"']*)["']""")
+PROJECT_RE = re.compile(r"""project\(\s*(?:path\s*[=:]\s*)?["'](:[^"']+)["']""")
+VERSION_RANGE_RE = re.compile(r"[\[\]()+,]")
+
+
+def strip_comments(text):
+    """Gradle scripts without // and /* */ comments. A // right after a non-space is kept: it is a URL."""
+    return re.sub(r"(^|\s)//[^\n]*", r"\1", re.sub(r"/\*.*?\*/", " ", text, flags=re.S), flags=re.M)
+
+
+def closing_parenthesis(text, opening):
+    """Index of the parenthesis that closes the one at text[opening], skipping strings; None if it never closes."""
+    depth, quote, escaped = 0, None, False
+    for i in range(opening, len(text)):
+        c = text[i]
+        if quote:
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == quote:
+                quote = None
+        elif c in "\"'":
+            quote = c
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return None
+
+
+def dependency_argument(text, start):
+    """What a configuration declares, read from the end of its name: what its parentheses enclose, or the rest of
+    the line in Groovy without parentheses. A configuration block after it, { exclude(...) }, is left out."""
+    if text.startswith("(", start):
+        end = closing_parenthesis(text, start)
+        if end is not None:
+            return text[start + 1:end]
+    line, quote = text[start:].split("\n", 1)[0], None
+    for i, c in enumerate(line):
+        if quote:
+            quote = None if c == quote else quote
+        elif c in "\"'":
+            quote = c
+        elif c == "{":
+            return line[:i]
+    return line
+
+
+def read_dependency(argument, configuration, catalog):
+    """-> ("modules" | "libraries", entry), or None when the argument is no notation this reader knows."""
+    value = " ".join(argument.split())
+    project = PROJECT_RE.search(value)
+    if project:
+        return "modules", {"path": project.group(1), "configuration": configuration}
+    if value.startswith("projects."):  # type-safe accessors: projects.core.model -> :core:model
+        return "modules", {"path": ":" + value[len("projects."):].replace(".", ":"), "configuration": configuration}
+    named = dict(NAMED_COORDINATE_RE.findall(value))
+    if "group" in named and "name" in named:
+        notation = ":".join(named[k] for k in ("group", "name", "version") if named.get(k))
+    elif NOTATION_RE.fullmatch(value):
+        notation = value.strip("\"'")
+    else:
+        return None
+    library = {"notation": notation, "configuration": configuration}
+    resolved = catalog_library(notation, catalog)
+    if resolved:
+        library["resolved"] = resolved
+    return "libraries", library
 
 
 def catalog_alias(alias):
@@ -483,14 +563,19 @@ def read_version_catalog(root, lang):
     versions = table("versions")
 
     def version(spec, follow_ref=True):
-        """'1.0', {ref = 'x'} or a rich version {strictly/require/prefer = '1.0'} -> '1.0'."""
+        """'1.0', {ref = 'x'} or a rich version {strictly/require/prefer = '1.0'} -> '1.0'.
+
+        In a rich version the first exact value wins, in the order strictly, require, prefer: a range
+        ("[1.0, 2.0[", "1.+") says less than the prefer next to it. With only ranges, the first one as written.
+        """
         if isinstance(spec, str):
             return spec
         if not isinstance(spec, dict):
             return None
         if follow_ref and "ref" in spec:
             return version(versions.get(spec["ref"]), follow_ref=False)
-        return next((spec[k] for k in ("strictly", "require", "prefer") if isinstance(spec.get(k), str)), None)
+        values = [spec[k] for k in ("strictly", "require", "prefer") if isinstance(spec.get(k), str)]
+        return next((v for v in values if not VERSION_RANGE_RE.search(v)), values[0] if values else None)
 
     libraries = {}
     for alias, spec in table("libraries").items():
@@ -531,12 +616,20 @@ def catalog_plugin(plugin, catalog):
     return None
 
 
-def read_gradle(gradle_dir, catalog=None):
-    """Plugins, namespace and dependencies read from build.gradle(.kts) without running Gradle."""
-    build = next((gradle_dir / f for f in BUILD_FILES if (gradle_dir / f).is_file()), None)
+def build_file(gradle_dir):
+    return next((gradle_dir / f for f in BUILD_FILES if (gradle_dir / f).is_file()), None)
+
+
+def read_gradle(gradle_dir, catalog=None, unparsed=None):
+    """Plugins, namespace and dependencies read from build.gradle(.kts) without running Gradle.
+
+    Declarations that look like a dependency but whose notation is not understood are appended to `unparsed`,
+    as written, so that they become warnings instead of disappearing.
+    """
+    build = build_file(gradle_dir)
     if build is None:
         return {"type": None, "namespace": None, "plugins": [], "dependencies": {"modules": [], "libraries": []}}
-    text = build.read_text(encoding="utf-8")
+    text = strip_comments(build.read_text(encoding="utf-8"))
     block = re.search(r"plugins\s*\{(.*?)\}", text, re.S)
     plugins = re.findall(r"""\b(?:id|alias|kotlin)\b\s*\(?\s*["']?([\w.\-]+)""", block.group(1)) if block else []
     joined = " ".join(catalog_plugin(p, catalog) or p for p in plugins).lower()
@@ -544,33 +637,31 @@ def read_gradle(gradle_dir, catalog=None):
                         if "android" in joined and k in joined), None)
     namespace = re.search(r"""namespace\s*=?\s*["']([^"']+)["']""", text)
 
-    modules, libraries = [], []
-    for configuration, value in DEPENDENCY_RE.findall(re.sub(r"\s//.*", "", text)):
-        project = re.search(r"""project\(\s*(?:path\s*[=:]\s*)?["'](:[^"']+)["']""", value)
-        if project:
-            modules.append({"path": project.group(1), "configuration": configuration})
-        elif value.startswith("projects."):  # type-safe accessors: projects.core.model -> :core:model
-            modules.append({"path": ":" + value[len("projects."):].replace(".", ":"), "configuration": configuration})
-        elif re.fullmatch(r"""(?:platform\()?["']?[\w.:\-]+["']?\)?""", value):
-            value += ")" * (value.count("(") - value.count(")"))  # the regex swallows the closing parenthesis
-            library = {"notation": value.strip("\"'"), "configuration": configuration}
-            resolved = catalog_library(library["notation"], catalog)
-            if resolved:
-                library["resolved"] = resolved
-            libraries.append(library)
+    found = {"modules": [], "libraries": []}
+    for match in CONFIGURATION_RE.finditer(text):
+        argument = dependency_argument(text, match.end()).strip()
+        if not argument:  # a block such as `kapt { ... }`, not a declaration
+            continue
+        dependency = read_dependency(argument, match.group(1), catalog)
+        if dependency:
+            found[dependency[0]].append(dependency[1])
+        elif unparsed is not None:
+            unparsed.append(f"{match.group(1)} {' '.join(argument.split())}"[:160])
     return {"type": module_type, "namespace": namespace.group(1) if namespace else None,
-            "plugins": plugins, "dependencies": {"modules": modules, "libraries": libraries}}
+            "plugins": plugins, "dependencies": found}
 
 
 def read_settings(root):
     settings = next((root / f for f in SETTINGS_FILES if (root / f).is_file()), None)
     if settings is None:
         return {}
-    text = settings.read_text(encoding="utf-8")
+    text = strip_comments(settings.read_text(encoding="utf-8"))
     name = re.search(r"""rootProject\.name\s*=\s*["']([^"']+)["']""", text)
-    includes = " ".join(a or b for a, b in re.findall(r"include\s*\(([^)]*)\)|include\s+([^\n]+)", text))
+    includes = " ".join(a or b for a, b in re.findall(r"\binclude\s*\(([^)]*)\)|\binclude\s+([^\n]+)", text))
+    # Gradle also accepts include("app") without the leading colon.
+    paths = re.findall(r"""["']([\w:.\-]+)["']""", includes)
     return {"name": name.group(1) if name else None,
-            "modules": sorted(set(re.findall(r"""["'](:[\w:.\-]+)["']""", includes)))}
+            "modules": sorted({path if path.startswith(":") else ":" + path for path in paths})}
 
 
 def read_manifest(path, namespace):
@@ -1095,7 +1186,15 @@ def inner_modules(directory):
     return found
 
 
-def map_module(module_dir, root, use_codegraph, android_cli, lang=DEFAULT_LANG, catalog=None, warnings=()):
+def generation_time():
+    """Now, or SOURCE_DATE_EPOCH when it is set (the convention of reproducible builds)."""
+    epoch = os.environ.get("SOURCE_DATE_EPOCH", "")
+    moment = datetime.fromtimestamp(int(epoch), timezone.utc) if epoch.isdigit() else datetime.now(timezone.utc)
+    return moment.isoformat(timespec="seconds")
+
+
+def map_module(module_dir, root, use_codegraph, android_cli, lang=DEFAULT_LANG, catalog=None, warnings=(),
+               timestamp=True):
     """-> (name for the file, map, summary), or None if the module has no Kotlin sources."""
     gradle_dir, gradle_path = gradle_module(module_dir, root)
     mm = ModuleMap(root, module_dir, lang)
@@ -1110,7 +1209,10 @@ def map_module(module_dir, root, use_codegraph, android_cli, lang=DEFAULT_LANG, 
 
     module = {"path": gradle_path, "dir": mm.rel(module_dir)}
     if gradle_dir:
-        module.update(read_gradle(gradle_dir, catalog))
+        unparsed = []
+        module.update(read_gradle(gradle_dir, catalog, unparsed))
+        mm.warnings.extend(tr(lang, "dependency_unparsed", file=mm.rel(build_file(gradle_dir)), declaration=d)
+                           for d in unparsed)
         manifest = gradle_dir / "src" / "main" / "AndroidManifest.xml"
         if manifest.is_file():
             try:
@@ -1124,11 +1226,13 @@ def map_module(module_dir, root, use_codegraph, android_cli, lang=DEFAULT_LANG, 
     edges = mm.edge_list()
     linked = {end for edge in edges for end in (edge["from"], edge["to"])}
     externals = [n for n in mm.externals.values() if n["id"] in linked]  # no orphan externals
+    # No absolute root and an optional timestamp: the map is meant to be committed, and regenerating it
+    # without code changes, on any machine, must not produce a diff.
     result = compact({
         "schema": "module-map/1",
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": generation_time() if timestamp else None,
         "legend": LEGEND[lang],
-        "project": {"root": root.as_posix(), **read_settings(root)},
+        "project": read_settings(root),
         "module": module,
         "sources": sources,
         "nodes": list(mm.nodes.values()),
@@ -1180,6 +1284,7 @@ def parse_args():
     cli.add_argument("-o", "--output", type=Path, help=tr(lang, "help_output"))
     cli.add_argument("--no-codegraph", action="store_true", help=tr(lang, "help_no_codegraph"))
     cli.add_argument("--android-cli", action="store_true", help=tr(lang, "help_android_cli"))
+    cli.add_argument("--no-timestamp", action="store_true", help=tr(lang, "help_no_timestamp"))
     cli.add_argument("--no-android-cli", action="store_true", help=argparse.SUPPRESS)  # former default, now a no-op
     cli.add_argument("--lang", choices=LANGS, help=tr(lang, "help_lang"))
     cli.add_argument("--config", type=Path, help=tr(lang, "help_config"))
@@ -1210,7 +1315,8 @@ def main():
     android_cli = android_describe(root, lang) if args.android_cli else {"status": "skipped"}
 
     def run(directory):
-        return map_module(directory, root, not args.no_codegraph, android_cli, lang, catalog, warnings)
+        return map_module(directory, root, not args.no_codegraph, android_cli, lang, catalog, warnings,
+                          timestamp=not args.no_timestamp)
 
     modules = inner_modules(module_dir)
     if modules in ([], [module_dir]):  # a single module, or a package inside a module

@@ -183,9 +183,95 @@ def test_module_type_comes_from_the_catalog_plugin_id(tmp_path):
     assert module_map.read_gradle(tmp_path)["type"] is None
 
 
+def libraries(gradle):
+    return [(d["notation"], d["configuration"]) for d in gradle["dependencies"]["libraries"]]
+
+
+def test_read_gradle_keeps_dependencies_with_a_configuration_block(tmp_path):
+    (tmp_path / "build.gradle.kts").write_text(
+        'dependencies {\n'
+        '    implementation(libs.foo) {\n'
+        '        exclude(group = "x")\n'
+        '    }\n'
+        '    implementation("com.a:b:1.0") { isTransitive = false }\n'
+        '    implementation(group = "com.e", name = "f", version = "3.0")\n'
+        '    implementation(project(":core")) { because("needed") }\n'
+        '}\n', encoding="utf-8")
+    gradle = module_map.read_gradle(tmp_path)
+    assert libraries(gradle) == [("libs.foo", "implementation"), ("com.a:b:1.0", "implementation"),
+                                 ("com.e:f:3.0", "implementation")]
+    assert gradle["dependencies"]["modules"] == [{"path": ":core", "configuration": "implementation"}]
+
+
+def test_read_gradle_groovy_notations(tmp_path):
+    (tmp_path / "build.gradle").write_text(
+        "dependencies {\n"
+        "    implementation group: 'com.c', name: 'd', version: '2.0'\n"
+        "    implementation 'com.g:h:1.0'\n"
+        "    implementation(\"com.i:j:$jVersion\") {\n"
+        "        transitive = false\n"
+        "    }\n"
+        "    api project(':core:model')\n"
+        "    testImplementation libs.junit // trailing comment\n"
+        "    // implementation 'com.commented:out:1.0'\n"
+        "    /* implementation 'com.block:comment:1.0' */\n"
+        "    kapt {\n"
+        "        correctErrorTypes = true\n"
+        "    }\n"
+        "}\n", encoding="utf-8")
+    gradle = module_map.read_gradle(tmp_path)
+    assert libraries(gradle) == [("com.c:d:2.0", "implementation"), ("com.g:h:1.0", "implementation"),
+                                 ("com.i:j:$jVersion", "implementation"), ("libs.junit", "testImplementation")]
+    assert gradle["dependencies"]["modules"] == [{"path": ":core:model", "configuration": "api"}]
+
+
+def test_unparsed_dependency_becomes_a_warning(project):
+    build = project / "feature" / "login" / "build.gradle.kts"
+    build.write_text(build.read_text(encoding="utf-8").replace(
+        "dependencies {", 'dependencies {\n    implementation(fileTree(mapOf("dir" to "libs")))'), encoding="utf-8")
+    _, result, _ = module_map.map_module(project / "feature" / "login", project, False, {"status": "skipped"},
+                                         lang="en")
+    assert result["warnings"] == ["feature/login/build.gradle.kts: dependency not understood, it is left out of "
+                                  'the map: `implementation fileTree(mapOf("dir" to "libs"))`']
+
+
+def test_rich_version_prefers_an_exact_value_over_a_range(tmp_path):
+    (tmp_path / "gradle").mkdir()
+    (tmp_path / "gradle" / "libs.versions.toml").write_text(
+        '[versions]\nranged = { strictly = "[1.0, 2.0[", prefer = "1.5" }\n\n'
+        '[libraries]\n'
+        'a = { module = "g:a", version.ref = "ranged" }\n'
+        'b = { module = "g:b", version = { require = "1.+" } }\n'
+        'c = { module = "g:c", version = { strictly = "3.0", prefer = "3.1" } }\n', encoding="utf-8")
+    catalog, _ = module_map.read_version_catalog(tmp_path, "es")
+    assert catalog["libraries"] == {"a": "g:a:1.5", "b": "g:b:1.+", "c": "g:c:3.0"}
+
+
 def test_read_settings():
     assert module_map.read_settings(FIXTURES) == {"name": "TestProject",
                                                   "modules": [":app", ":core:network", ":feature:login"]}
+
+
+def test_read_settings_without_leading_colon_and_comments(tmp_path):
+    (tmp_path / "settings.gradle").write_text(
+        "rootProject.name = 'Demo'\n"
+        "include 'app'\n"
+        "include(\n    \":core:model\",\n    \"feature:login\"\n)\n"
+        "// include ':legacy'\n"
+        "includeBuild('build-logic')\n", encoding="utf-8")
+    assert module_map.read_settings(tmp_path) == {"name": "Demo",
+                                                  "modules": [":app", ":core:model", ":feature:login"]}
+
+
+def test_map_is_reproducible(project, monkeypatch):
+    def mapped(**options):
+        return module_map.map_module(project / "feature" / "login", project, False, {"status": "skipped"},
+                                     **options)[1]
+
+    assert "root" not in mapped()["project"]  # an absolute local path would differ on every machine
+    assert "generated_at" not in mapped(timestamp=False)
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1767225600")
+    assert mapped()["generated_at"] == "2026-01-01T00:00:00+00:00"
 
 
 def test_read_manifest():
