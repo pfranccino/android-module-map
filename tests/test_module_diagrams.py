@@ -95,6 +95,13 @@ def test_empty_layers_table_gives_the_defaults():
     assert md.rules_from_config({"lang": "en"}, "cfg", "en") == md.DEFAULT_RULES
 
 
+def test_example_config_holds_the_defaults():
+    example = REPO / ".module-map.example.toml"
+    config = md.toml_module().loads(example.read_text(encoding="utf-8"))
+    assert config["lang"] == md.DEFAULT_LANG
+    assert md.rules_from_config(config, example, "en") == md.DEFAULT_RULES
+
+
 @pytest.mark.parametrize("config, message", [
     ({"colours": 1}, "unknown key `colours`"),
     ({"layers": {"strict": True}}, "unknown key `layers.strict`"),
