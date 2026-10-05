@@ -41,8 +41,8 @@ arrow is backed by an edge; a hand-drawn arrow breaks that guarantee.
    stderr; a normal run takes seconds. Do not pass `--android-cli` unless the user asks for build
    metadata: it runs Gradle for minutes and the diagrams do not use it.
 
-5. **Language.** Output is in Spanish unless `.module-map.toml` or `MODULE_MAP_LANG` says
-   otherwise. If the user writes in English or asks for English, pass `--lang en` to both
+5. **Language.** Output is in English unless `.module-map.toml` or `MODULE_MAP_LANG` says
+   otherwise. If the user writes in Spanish or asks for Spanish, pass `--lang es` to both
    scripts; use the same language for both.
 
 If a script fails, show the full error and stop. Do not patch it or work around it without the
@@ -57,7 +57,9 @@ python3 <this-skill-dir>/scripts/module_diagrams.py <directory>
 It finds the maps under that directory and writes each `<module>.md` next to its map. With
 several modules it also writes `<directory>/docs/architecture/index.md`, which holds only the
 graph of Gradle dependencies between those modules; dependencies on other modules and
-class-level detail stay in each module's document.
+class-level detail stay in each module's document. Next to it goes `index.html`, the same
+overview as a page where a click on a module shows that module's document; point the user to it
+when they want to browse the modules.
 
 Options:
 

@@ -175,7 +175,7 @@ def test_type_the_ast_could_not_place_is_found_in_the_index(mapped):
 
 
 def test_missing_codegraph_binary_is_reported(mapped):
-    assert any("codegraph no está en el PATH" in w for w in mapped["warnings"])
+    assert any("codegraph is not on the PATH" in w for w in mapped["warnings"])
 
 
 def test_index_is_synced_when_codegraph_is_installed(project, monkeypatch):
@@ -189,7 +189,7 @@ def test_index_is_synced_when_codegraph_is_installed(project, monkeypatch):
 
 
 def test_document_from_a_map_with_calls(mapped):
-    text, _ = module_diagrams.build(module_diagrams.Map(mapped), None, list(module_diagrams.SECTIONS))
+    text, _ = module_diagrams.build(module_diagrams.Map(mapped, lang="es"), None, list(module_diagrams.SECTIONS))
     assert "## Secuencia: LoginViewModel.submit" in text
     assert '-->|"submit"|' in text
     assert "| LoginScreen | MainNav | :app | calls |" in text

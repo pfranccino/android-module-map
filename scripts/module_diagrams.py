@@ -10,11 +10,12 @@ the map; it does not interpret or fill in anything.
 
 Usage: python module_diagrams.py <module_directory> [--only classes] [--flow Class.function]
        python module_diagrams.py <directory_with_several_modules> [--module engine] [--only classes]
-       python module_diagrams.py <map.json | directory_of_maps> [-o output] [--lang en]
+       python module_diagrams.py <map.json | directory_of_maps> [-o output] [--lang es]
 
 Given a module (or a directory of modules) it reads the maps that module_map.py left in each
 <module>/docs/architecture/ and writes every document next to its map. With several modules it
-also writes an index.md with the graph of Gradle dependencies between them. --module restricts it to one module. With --only the result
+also writes an index.md with the graph of Gradle dependencies between them, and an index.html where a click on a
+module in that graph shows the module's document. --module restricts it to one module. With --only the result
 goes to <module>.<sections>.md, so the full document is never overwritten, and modules that have
 nothing for those sections get no file.
 
@@ -22,6 +23,7 @@ The layer rules, the size above which the layer diagram is drawn by package, and
 can be set in a .module-map.toml file at the root of the Android project.
 """
 import argparse
+import html
 import json
 import os
 import sys
@@ -61,7 +63,7 @@ READABLE_LIMIT = 40  # node count above which the layer diagram is drawn by pack
 CONFIG_FILE = ".module-map.toml"
 SETTINGS_FILES = ("settings.gradle.kts", "settings.gradle")
 LANGS = ("es", "en")
-DEFAULT_LANG = "es"
+DEFAULT_LANG = "en"
 # Light fills with dark text: legible in both the light and the dark theme of GitHub.
 LAYER_STYLES = {
     "Presentation": "fill:#dbeafe,stroke:#2563eb,color:#0f172a",
@@ -164,8 +166,15 @@ MESSAGES = {
                         "y el detalle por clase están en el documento de cada módulo.",
         "index_modules_heading": "## Módulos",
         "index_relative": "Nombres relativos a `{group}`. ",
-        "index_links": "Cada módulo enlaza a su documento.",
+        "index_links": "Cada módulo enlaza a su documento, desde la tabla y desde el grafo en los visores que "
+                       "permiten clics en Mermaid (GitHub no). `index.html`, junto a este archivo, abre el "
+                       "documento de cada módulo con un clic en el grafo.",
         "index_columns": "Módulo|Tipo|Nodos|Depende de (en este grupo)|Otros módulos",
+        "index_links_viewer": "Un clic en un módulo, en el grafo o en la tabla, abre su documento.",
+        "html_back": "← Todos los módulos",
+        "html_document": "Abrir el .md",
+        "html_offline": "No se pudieron cargar marked y Mermaid desde cdn.jsdelivr.net, así que se muestra el "
+                        "texto sin dibujar. Hace falta conexión para ver los diagramas.",
         "section_layers": "diagrama de arquitectura por capas",
         "section_flows": "diagrama de flujos desde los ViewModels",
         "section_sequence": "diagrama de secuencia de un flujo",
@@ -298,8 +307,15 @@ MESSAGES = {
                         "class-level detail are in the document of each module.",
         "index_modules_heading": "## Modules",
         "index_relative": "Names relative to `{group}`. ",
-        "index_links": "Each module links to its document.",
+        "index_links": "Each module links to its document, from the table and from the graph in viewers that "
+                       "allow clicks in Mermaid (GitHub does not). `index.html`, next to this file, opens each "
+                       "module's document with a click on the graph.",
         "index_columns": "Module|Type|Nodes|Depends on (in this group)|Other modules",
+        "index_links_viewer": "A click on a module, in the graph or in the table, opens its document.",
+        "html_back": "← All modules",
+        "html_document": "Open the .md",
+        "html_offline": "marked and Mermaid could not be loaded from cdn.jsdelivr.net, so the text is shown "
+                        "without drawing it. A connection is needed to see the diagrams.",
         "section_layers": "layered architecture diagram",
         "section_flows": "diagram of the flows from the ViewModels",
         "section_sequence": "sequence diagram of one flow",
@@ -1048,8 +1064,9 @@ def common_group(paths):
     return ":".join(prefix)
 
 
-def build_index(maps, documents, title, lang=DEFAULT_LANG):
-    """Index: only which module depends on which according to Gradle. Details live in each module's document."""
+def build_index(maps, documents, title, lang=DEFAULT_LANG, viewer=False):
+    """Index: only which module depends on which according to Gradle. Details live in each module's document.
+    viewer: the index shown inside index.html, whose links open the documents in the same page."""
     mapped = {m.path for m in maps}
     group = common_group(sorted(mapped))
     ids = Ids()
@@ -1075,6 +1092,8 @@ def build_index(maps, documents, title, lang=DEFAULT_LANG):
         rows.append((f"[{m.path[len(group):]}]({document})", m.module.get("type", "-"), len(m.nodes),
                      ", ".join(target[len(group):] for target in sorted(inside)) or "-",
                      len(declared) - len(inside)))
+    # A click on a module opens its document, in the viewers that allow it.
+    lines += [f'    click {ids(m.path)} href "{document}"' for m, document in zip(maps, documents)]
 
     sections = [
         tr(lang, "index_title", title=title),
@@ -1083,10 +1102,126 @@ def build_index(maps, documents, title, lang=DEFAULT_LANG):
         tr(lang, "index_legend"),
         mermaid(lines),
         tr(lang, "index_modules_heading"),
-        (tr(lang, "index_relative", group=group) if group else "") + tr(lang, "index_links"),
+        (tr(lang, "index_relative", group=group) if group else "") + tr(lang, "index_links_viewer" if viewer else "index_links"),
         table(tr(lang, "index_columns").split("|"), rows),
     ]
     return "\n\n".join(sections) + "\n"
+
+
+# ---------- interactive index ----------
+# One self-contained page: the index graph, where a click on a module shows that module's document in
+# the same page. The Markdown is embedded as is and drawn in the browser with marked and Mermaid.
+
+MARKED_URL = "https://cdn.jsdelivr.net/npm/marked@15.0.7/lib/marked.esm.js"
+MERMAID_URL = "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs"
+HTML_PAGE = """<!doctype html>
+<html lang="__LANG__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root { color-scheme: light; --text: #0f172a; --muted: #475569; --line: #e2e8f0; --accent: #2563eb; }
+  body { margin: 0; background: #ffffff; color: var(--text);
+         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  nav { position: sticky; top: 0; display: flex; gap: 16px; align-items: center; padding: 10px 16px;
+        background: #f8fafc; border-bottom: 1px solid var(--line); }
+  nav[hidden] { display: none; }
+  nav strong { flex: 1; font-family: ui-monospace, Consolas, monospace; }
+  a { color: var(--accent); }
+  main { max-width: 1100px; margin: 0 auto; padding: 8px 16px 48px; }
+  h1 { font-size: 1.6em; } h2 { margin-top: 2em; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+  table { border-collapse: collapse; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+  th { background: #f8fafc; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 0.92em; }
+  pre { overflow-x: auto; background: #f8fafc; padding: 12px; border-radius: 6px; }
+  pre.mermaid { background: none; text-align: center; }
+  pre.mermaid svg .clickable { cursor: pointer; }
+  .notice { padding: 10px 12px; background: #fef3c7; border-radius: 6px; }
+</style>
+</head>
+<body>
+<nav id="nav" hidden><a href="#">__BACK__</a><strong id="module"></strong><a id="file" href="">__DOCUMENT__</a></nav>
+<main id="main"></main>
+<script type="application/json" id="data">__DATA__</script>
+<script type="module">
+const data = JSON.parse(document.getElementById("data").textContent);
+const main = document.getElementById("main");
+const escape = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+let libs = null;
+let shown = 0;
+
+async function load() {
+  const [{ marked }, { default: mermaid }] = await Promise.all([import("__MARKED__"), import("__MERMAID__")]);
+  // Text taken from the code (KDoc, signatures) is shown as text, never as HTML.
+  marked.use({ renderer: { html: (token) => escape(token.text) } });
+  mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+  return { marked, mermaid };
+}
+
+async function show() {
+  const turn = ++shown;
+  const anchor = decodeURIComponent(location.hash.slice(1));
+  const page = data.modules[anchor];
+  document.getElementById("nav").hidden = !page;
+  document.title = page ? page.path + " · " + data.title : data.title;
+  if (page) {
+    document.getElementById("module").textContent = page.path;
+    document.getElementById("file").href = page.file;
+  }
+  const text = page ? page.markdown : data.home;
+  try {
+    libs = libs || await load();
+  } catch (error) {
+    main.innerHTML = '<p class="notice">' + escape(data.offline) + "</p><pre>" + escape(text) + "</pre>";
+    return;
+  }
+  if (turn !== shown) return;
+  main.innerHTML = libs.marked.parse(text);
+  for (const code of main.querySelectorAll("code.language-mermaid")) {
+    const diagram = document.createElement("pre");
+    diagram.className = "mermaid";
+    diagram.textContent = code.textContent;
+    code.parentElement.replaceWith(diagram);
+  }
+  window.scrollTo(0, 0);
+  await libs.mermaid.run({ nodes: main.querySelectorAll("pre.mermaid") });
+}
+
+window.addEventListener("hashchange", show);
+show();
+</script>
+</body>
+</html>
+"""
+
+
+def module_anchor(m):
+    """Fragment of index.html that shows a module: its Gradle path without colons, e.g. feature/login."""
+    return m.path.strip(":").replace(":", "/")
+
+
+def build_html(maps, texts, documents, title, lang=DEFAULT_LANG):
+    """index.html: the index, where a click on a module shows its document (texts) in the same page. documents
+    are the paths of the .md files relative to the page, for the link to the file."""
+    anchors = [module_anchor(m) for m in maps]
+    data = {
+        "title": tr(lang, "index_title", title=title).lstrip("# "),
+        "home": build_index(maps, ["#" + anchor for anchor in anchors], title, lang, viewer=True),
+        "modules": {anchor: {"path": m.path, "file": document, "markdown": text}
+                    for m, anchor, text, document in zip(maps, anchors, texts, documents)},
+        "offline": tr(lang, "html_offline"),
+    }
+    # "<" escaped so that nothing in the Markdown can close the <script> that holds it.
+    embedded = json.dumps(data, ensure_ascii=False, indent=1).replace("<", "\\u003c")
+    values = {"__LANG__": lang, "__TITLE__": html.escape(data["title"]), "__BACK__": html.escape(tr(lang, "html_back")),
+              "__DOCUMENT__": html.escape(tr(lang, "html_document")), "__MARKED__": MARKED_URL,
+              "__MERMAID__": MERMAID_URL, "__DATA__": embedded}
+    page = HTML_PAGE
+    for key, value in values.items():
+        page = page.replace(key, value)
+    return page
 
 
 def find_maps(path):
@@ -1175,9 +1310,10 @@ def main():
         name = path.name.replace(".module-map.json", "") + suffix + ".md"
         return (args.output or path.parent) / name
 
-    written, skipped = [], []
+    written, skipped, texts = [], [], []
     for m, path in zip(maps, paths):
         text, has_content = build(m, args.flow, selected)
+        texts.append(text)
         if args.only and not has_content:
             skipped.append(m.path)
             continue
@@ -1192,7 +1328,9 @@ def main():
         links = [Path(os.path.relpath(document(path), index.parent)).as_posix() for path in paths]
         title = maps[0].data.get("project", {}).get("name") or args.map.resolve().name
         index.write_text(build_index(maps, links, title, lang), encoding="utf-8")
-        written.append(index)
+        page = index.with_suffix(".html")
+        page.write_text(build_html(maps, texts, links, title, lang), encoding="utf-8")
+        written += [index, page]
     for output in written:
         print(tr(lang, "generated", path=output), file=sys.stderr)
     if skipped:

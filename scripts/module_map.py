@@ -14,12 +14,12 @@ Sources and what each one contributes:
      libs.* notations are resolved with the version catalog, gradle/libs.versions.toml.
   4. Android CLI (`android describe`): build metadata of the project.
 
-Usage: python module_map.py <module_directory> [--lang en]
+Usage: python module_map.py <module_directory> [--lang es]
        python module_map.py <directory_with_several_modules>
 
 Each map is written inside its own module, in <module>/docs/architecture/. Pass -o to collect
 them in one directory instead. Messages and the legend inside the map follow --lang, then the
-MODULE_MAP_LANG variable, then `lang` in .module-map.toml; Spanish by default.
+MODULE_MAP_LANG variable, then `lang` in .module-map.toml; English by default.
 Deps:  tree-sitter and tree-sitter-kotlin. If they are not installed, the script creates its own
        environment in ~/.cache/module-map/venv, installs them there and re-runs itself inside it.
 """
@@ -41,7 +41,7 @@ from pathlib import Path
 REQUIREMENTS = ("tree-sitter==0.26.0", "tree-sitter-kotlin==1.1.0", 'tomli>=2.0.1; python_version < "3.11"')
 VENV = Path.home() / ".cache" / "module-map" / "venv"
 LANGS = ("es", "en")
-DEFAULT_LANG = "es"
+DEFAULT_LANG = "en"
 CONFIG_FILE = ".module-map.toml"
 SETTINGS_FILES = ("settings.gradle.kts", "settings.gradle")
 

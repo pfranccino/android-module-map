@@ -93,7 +93,7 @@ graph TD
 | 🔗 | **Cross-module tracking** | Matches Gradle declarations against actual code usage |
 | 📚 | **Version catalogs** | Resolves `libs.*` notations from `gradle/libs.versions.toml` to real coordinates |
 | 🗺️ | **Scales to big modules** | Above 40 drawn nodes the layer diagram switches to one box per package |
-| 🌐 | **English or Spanish** | `--lang en` or `--lang es` for documents, messages and the map legend |
+| 🌐 | **English or Spanish** | English by default, `--lang es` for Spanish documents, messages and map legend |
 | ⚙️ | **Configurable rules** | Layer names and forbidden dependencies live in `.module-map.toml`, not in the code |
 | ♻️ | **Deterministic** | Same code → same output. Works in CI, code review, or as a Claude Code skill |
 
@@ -124,8 +124,8 @@ On Windows, use `python` instead of `python3`. In this mode `module_map.py` crea
 `~/.cache/module-map/venv` the first time it runs and installs `tree-sitter` there (needs network
 once).
 
-Output is in Spanish by default. Add `--lang en` to both commands (or set `MODULE_MAP_LANG=en`, or
-`lang = "en"` in [`.module-map.toml`](#%EF%B8%8F-configuration)) to get it in English.
+Output is in English by default. Add `--lang es` to both commands (or set `MODULE_MAP_LANG=es`, or
+`lang = "es"` in [`.module-map.toml`](#%EF%B8%8F-configuration)) to get it in Spanish.
 
 <details>
 <summary><b>See expected output</b></summary>
@@ -155,7 +155,15 @@ module-map features
 module-diagrams features
 ```
 
-Generates an `index.md` with the Gradle dependency graph across all modules.
+Generates an overview of the group next to the module documents: one box per module and the Gradle
+dependencies between them, without the classes inside.
+
+- `index.md`: the module graph and a table linking to each module's document. Clicking a module in
+  the graph opens its document in viewers that allow Mermaid clicks (VS Code, Obsidian). GitHub
+  doesn't allow them, so on GitHub use the table links.
+- `index.html`: the same overview as a page. Clicking a module shows its diagrams on that page,
+  with a link back to the overview. Open it in any browser. It loads marked and Mermaid from
+  cdn.jsdelivr.net, so it needs a connection.
 
 ### Single section
 
@@ -264,7 +272,7 @@ mapper = "Data"
 
 Layers are `Presentation`, `Domain`, `Data`, `DI` and `Other`. An unknown key or layer stops the
 run with a message instead of being ignored. Language precedence: `--lang`, then
-`MODULE_MAP_LANG`, then `lang` in the file, then Spanish.
+`MODULE_MAP_LANG`, then `lang` in the file, then English.
 
 ---
 
@@ -374,7 +382,9 @@ the source and describes classes missing KDoc.
   `gradle/libs.versions.toml` catalog is read. Declarations it cannot interpret (`fileTree(...)`,
   for instance) are listed under the map's warnings instead of being dropped
 - **Not extracted** — navigation routes, UI state transitions, `Flow` collectors
-- **Two languages** — Spanish (default) and English
+- **Two languages** — English (default) and Spanish
+- **`index.html` needs a connection** — it draws the diagrams with marked and Mermaid from a CDN;
+  offline it shows the Markdown as plain text
 
 ---
 
