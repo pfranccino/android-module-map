@@ -48,6 +48,40 @@ def test_example_index_is_up_to_date():
     assert index == (EXAMPLES / "index.md").read_text(encoding="utf-8")
 
 
+def test_example_index_page_is_up_to_date():
+    names = ["app", "core-network", "feature-login"]
+    maps = [md.Map(load(name)) for name in names]
+    texts = [md.build(m, None, list(md.SECTIONS))[0] for m in maps]
+    page = md.build_html(maps, texts, [f"{name}.md" for name in names], "Acme")
+    assert page == (EXAMPLES / "index.html").read_text(encoding="utf-8")
+
+
+# ---------- index ----------
+
+def test_index_graph_links_each_module_to_its_document():
+    maps = [md.Map(load(name)) for name in ["app", "feature-login"]]
+    index = md.build_index(maps, ["app.md", "login/feature-login.md"], "Acme")
+    assert 'click n0 href "app.md"' in index
+    assert 'click n1 href "login/feature-login.md"' in index
+
+
+def test_index_page_opens_modules_in_the_same_page():
+    maps = [md.Map(load(name)) for name in ["app", "feature-login"]]
+    page = md.build_html(maps, ["# app", "# login"], ["app.md", "feature-login.md"], "Acme", "en")
+    data = json.loads(page.split('id="data">', 1)[1].split("</script>", 1)[0])
+    assert 'click n1 href "#feature/login"' in data["home"]
+    assert "[:feature:login](#feature/login)" in data["home"]
+    assert data["modules"]["feature/login"] == {"path": ":feature:login", "file": "feature-login.md",
+                                                "markdown": "# login"}
+    assert "<title>Acme: modules</title>" in page
+
+
+def test_index_page_text_cannot_close_its_script():
+    maps = [md.Map(load("app")), md.Map(load("core-network"))]
+    page = md.build_html(maps, ["</script><script>alert(1)</script>", "x"], ["a.md", "b.md"], "Acme")
+    assert page.count("</script>") == 2  # the data block and the viewer, nothing from the text
+
+
 # ---------- layers ----------
 
 @pytest.mark.parametrize("data, layer", [
@@ -148,7 +182,7 @@ def test_flow_diagram_colors_each_layer():
 
 def test_large_module_is_drawn_by_package():
     rules = dataclasses.replace(md.DEFAULT_RULES, readable_limit=2)
-    text = section_text(md.Map(load("feature-login"), rules), "layers")
+    text = section_text(md.Map(load("feature-login"), rules, "es"), "layers")
     assert "10 nodos, más de 2" in text
     assert '["ui<br/>4 nodos"]' in text
     assert '["data<br/>3 nodos"]' in text

@@ -6,7 +6,7 @@
 
 # Language of the documents, the messages and the legend inside the map: "es" or "en".
 # --lang and the MODULE_MAP_LANG variable take precedence over this value.
-lang = "es"
+lang = "en"
 
 [layers]
 # Above this many drawn nodes, the layer diagram shows one box per package instead of one per class.

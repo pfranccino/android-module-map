@@ -304,7 +304,7 @@ def test_map_header(login_map):
     assert login_map["module"]["manifest"]["components"][0]["exported"] is True
     assert login_map["sources"]["ast"] == {"parser": "tree-sitter-kotlin", "files": 6}
     assert login_map["sources"]["codegraph"] == {"status": "skipped"}
-    assert login_map["legend"] == module_map.LEGEND["es"]
+    assert login_map["legend"] == module_map.LEGEND["en"]
 
 
 @pytest.mark.parametrize("node_id, kind, role", [
