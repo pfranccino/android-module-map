@@ -10,7 +10,7 @@
 
 Two scripts. No Gradle build. No AI model. Same input → same output, every time.
 
-[Quick Start](#-quick-start) · [Features](#-features) · [Configuration](#%EF%B8%8F-configuration) · [How It Works](#-how-it-works) · [Examples](examples/)
+[Quick Start](#-quick-start) · [Commands](#-commands) · [Features](#-features) · [Configuration](#%EF%B8%8F-configuration) · [How It Works](#-how-it-works) · [Examples](examples/)
 
 </div>
 
@@ -148,28 +148,335 @@ feature/login/docs/architecture/
 
 </details>
 
-### Multiple modules
+---
+
+## 🧭 Commands
+
+There are two commands, and you always run them in this order:
+
+1. **`module-map`** reads the source code and writes a map (`.module-map.json`) per module.
+2. **`module-diagrams`** reads those maps and writes the documents (`.md`, plus an index for several modules).
+
+The table below gives the command for each task. Click a recipe under it to see what it does and the
+output it prints. All examples run from the root of the Android project. Running from a clone instead
+of installing? Replace `module-map` with `python3 path/to/scripts/module_map.py`, and
+`module-diagrams` with `python3 path/to/scripts/module_diagrams.py`.
+
+| I want to… | Run |
+|---|---|
+| Map one module | `module-map feature/login` |
+| Map every module of the project | `module-map .` |
+| Map one package of a big module | `module-map feature/login/src/main/kotlin/com/acme/login/ui` |
+| Collect all the maps in one folder | `module-map . -o docs/maps` |
+| Get maps that don't change unless the code does | `module-map . --no-timestamp` |
+| Document one module | `module-diagrams feature/login` |
+| Document every module, with a clickable index | `module-diagrams .` |
+| Generate only some sections | `module-diagrams . --module login --only layers,violations` |
+| Draw the sequence of a specific function | `module-diagrams feature/login --flow LoginViewModel.submit` |
+| See which sections exist | `module-diagrams --sections` |
+| Get the documents in Spanish | `module-diagrams feature/login --lang es` |
+
+### `module-map`: read the code, write the map
+
+<details>
+<summary><b>Map one module</b> · <code>module-map feature/login</code></summary>
+
+<br>
+
+Reads every Kotlin file of the module, its `build.gradle.kts` and its `AndroidManifest.xml`, and
+writes the map inside the module, in `docs/architecture/`. If the project has a codegraph index, the
+map also gets the calls between classes.
 
 ```bash
-module-map features
-module-diagrams features
+module-map feature/login
 ```
 
-Generates an overview of the group next to the module documents: one box per module and the Gradle
-dependencies between them, without the classes inside.
+```
+[module_map +  0.1s] :feature:login: parsing 6 files...
+[module_map +  0.1s] feature/login/docs/architecture/feature-login.module-map.json: 19 nodes, 5 externals, 29 edges, 0 warnings
+```
 
-- `index.md`: the module graph and a table linking to each module's document. Clicking a module in
-  the graph opens its document in viewers that allow Mermaid clicks (VS Code, Obsidian). GitHub
-  doesn't allow them, so on GitHub use the table links.
-- `index.html`: the same overview as a page. Clicking a module shows its diagrams on that page,
-  with a link back to the overview. Open it in any browser. It loads marked and Mermaid from
+</details>
+
+<details>
+<summary><b>Map every module of the project</b> · <code>module-map .</code></summary>
+
+<br>
+
+Give it a directory that holds several modules (the project root, or a folder such as `features/`)
+and it finds every Gradle module below it. Each map goes inside its own module.
+
+```bash
+module-map .
+```
+
+```
+[module_map +  0.0s] Gradle modules found in .: 3
+[module_map +  0.0s] :app: parsing 1 files...
+[module_map +  0.0s] app/docs/architecture/app.module-map.json: 1 nodes, 0 externals, 0 edges, 0 warnings
+[module_map +  0.0s] :core:network: parsing 1 files...
+[module_map +  0.1s] core/network/docs/architecture/core-network.module-map.json: 1 nodes, 2 externals, 2 edges, 0 warnings
+[module_map +  0.1s] :feature:login: parsing 6 files...
+[module_map +  0.1s] feature/login/docs/architecture/feature-login.module-map.json: 19 nodes, 5 externals, 29 edges, 0 warnings
+[module_map +  0.1s] 3 maps written, each one inside its module
+```
+
+</details>
+
+<details>
+<summary><b>Map one package of a big module</b> · <code>module-map &lt;path to the package&gt;</code></summary>
+
+<br>
+
+When a module is too big to read as one diagram, point at one of its packages. Only the files in
+that package are parsed, so the diagrams show just that part of the module.
+
+```bash
+module-map feature/login/src/main/kotlin/com/acme/login/ui -o docs/login-ui.json
+```
+
+```
+[module_map +  0.0s] :feature:login: parsing 3 files...
+[module_map +  0.0s] docs/login-ui.json: 9 nodes, 6 externals, 13 edges, 0 warnings
+```
+
+</details>
+
+<details>
+<summary><b>Collect all the maps in one folder</b> · <code>module-map . -o docs/maps</code></summary>
+
+<br>
+
+`-o` writes every map into one directory instead of inside each module. `module-diagrams` can read
+that directory later.
+
+```bash
+module-map . -o docs/maps
+```
+
+```
+[module_map +  0.1s] docs/maps/app.module-map.json: 1 nodes, 0 externals, 0 edges, 0 warnings
+[module_map +  0.1s] docs/maps/core-network.module-map.json: 1 nodes, 2 externals, 2 edges, 0 warnings
+[module_map +  0.1s] docs/maps/feature-login.module-map.json: 19 nodes, 5 externals, 29 edges, 0 warnings
+[module_map +  0.1s] 3 maps written to docs/maps
+```
+
+</details>
+
+<details>
+<summary><b>Get maps that don't change unless the code does</b> · <code>--no-timestamp</code></summary>
+
+<br>
+
+By default each map records when it was made, so regenerating it always produces a diff. With
+`--no-timestamp` that date is left out, and the same code gives byte-identical maps and documents.
+Use it when the maps are committed, or in CI to check that they are up to date.
+
+```bash
+module-map . --no-timestamp
+module-diagrams .
+git diff --exit-code   # fails if someone changed the code without regenerating the docs
+```
+
+</details>
+
+<details>
+<summary><b>Choose the sources</b> · <code>--no-codegraph</code>, <code>--android-cli</code></summary>
+
+<br>
+
+- `--no-codegraph` ignores the codegraph index, even if the project has one. The map keeps the
+  structure read from the code, but has no calls, so there are no flow or sequence diagrams.
+- `--android-cli` also runs `android describe` and attaches the build metadata to the map. It
+  runs Gradle, so it takes minutes instead of seconds, and the diagrams don't use it.
+
+```bash
+module-map feature/login --no-codegraph
+module-map feature/login --android-cli
+```
+
+</details>
+
+### `module-diagrams`: read the map, write the documents
+
+<details>
+<summary><b>Document one module</b> · <code>module-diagrams feature/login</code></summary>
+
+<br>
+
+Finds the map that `module-map` left in the module and writes the full document next to it:
+every diagram and table listed in [What You Get](#-what-you-get). See
+[`examples/feature-login.md`](examples/feature-login.md) for the result.
+
+```bash
+module-diagrams feature/login
+```
+
+```
+generated: feature/login/docs/architecture/feature-login.md
+```
+
+</details>
+
+<details>
+<summary><b>Document every module, with a clickable index</b> · <code>module-diagrams .</code></summary>
+
+<br>
+
+Writes each module's document and, at the root, an overview of the group. The overview shows one box
+per module and the Gradle dependencies between them, without the classes inside.
+
+```bash
+module-diagrams .
+```
+
+```
+generated: app/docs/architecture/app.md
+generated: core/network/docs/architecture/core-network.md
+generated: feature/login/docs/architecture/feature-login.md
+generated: docs/architecture/index.md
+generated: docs/architecture/index.html
+```
+
+- `index.md` has the module graph and a table linking to each module's document. Clicking a module
+  in the graph opens its document in viewers that allow Mermaid clicks (VS Code, Obsidian). GitHub
+  doesn't, so on GitHub use the table links. See [`examples/index.md`](examples/index.md).
+- `index.html` shows the same overview as a page. Clicking a module shows its diagrams on that
+  page, with a link back to the overview. Open it in any browser. It loads marked and Mermaid from
   cdn.jsdelivr.net, so it needs a connection.
 
-### Single section
+The index is written only when the run covers several modules without `--module` or `--only`, so a
+partial run never replaces a full index.
+
+</details>
+
+<details>
+<summary><b>Generate only some sections</b> · <code>--only</code>, <code>--module</code></summary>
+
+<br>
+
+`--only` takes a comma-separated list of [section keys](#-what-you-get). `--module` picks one module
+out of a directory; the end of its Gradle path is enough. The partial document gets its own name, so
+the full one is never overwritten.
 
 ```bash
-module-diagrams features --module login --only classes
+module-diagrams . --module login --only layers,violations
 ```
+
+```
+generated: feature/login/docs/architecture/feature-login.layers-violations.md
+```
+
+</details>
+
+<details>
+<summary><b>Draw the sequence of a specific function</b> · <code>--flow Class.function</code></summary>
+
+<br>
+
+The sequence diagram follows one flow. Without `--flow`, the command picks the function with the
+longest call chain, preferring ViewModels. A wrong name lists the flows that exist. This needs a map with calls, which come
+from codegraph.
+
+```bash
+module-diagrams feature/login --flow LoginViewModel.nope
+```
+
+```
+No calls recorded from LoginViewModel.nope. Available flows: AuthRepositoryImpl.login, AuthRepositoryImpl.logout, LoginModule.provideAuthApi, LoginUseCase.invoke, LoginActivity.onCreate, LoginScreen.LoginScreen, LoginViewModel.submit
+```
+
+```bash
+module-diagrams feature/login --flow LoginViewModel.submit --only sequence
+```
+
+```mermaid
+sequenceDiagram
+    participant n0 as LoginViewModel
+    participant n1 as LoginUseCase
+    participant n2 as AuthRepository
+    participant n3 as AuthRepositoryImpl
+    participant n4 as AuthApi
+    participant n5 as toSession
+    participant n6 as SessionStore
+    Note over n0: submit()
+    n0->>n1: invoke()
+    n1->>n2: login()
+    n2-->>n3: implemented by
+    n3->>n4: login()
+    n3->>n5: toSession()
+    n3->>n6: save()
+```
+
+</details>
+
+<details>
+<summary><b>See which sections exist</b> · <code>module-diagrams --sections</code></summary>
+
+<br>
+
+```bash
+module-diagrams --sections
+```
+
+```
+layers             layered architecture diagram
+flows              diagram of the flows from the ViewModels
+sequence           sequence diagram of one flow
+modules            module dependency diagram
+hilt               dependency injection diagram
+classes            table of every class with kind, layer, role and KDoc
+violations         layer violations
+entries            entry points
+external           external dependencies
+review             edges to review
+```
+
+</details>
+
+<details>
+<summary><b>Write the documents somewhere else</b> · <code>-o</code></summary>
+
+<br>
+
+`-o` takes a directory, or a `.md` file when there is only one module. It also works with maps
+collected by `module-map -o`.
+
+```bash
+module-diagrams docs/maps -o docs/out
+```
+
+```
+generated: docs/out/app.md
+generated: docs/out/core-network.md
+generated: docs/out/feature-login.md
+generated: docs/out/index.md
+generated: docs/out/index.html
+```
+
+</details>
+
+<details>
+<summary><b>Get the documents in Spanish</b> · <code>--lang es</code></summary>
+
+<br>
+
+Both commands are in English by default. `--lang es` switches the documents, the messages and the
+legend inside the map to Spanish. To make it permanent, set `MODULE_MAP_LANG=es` or put
+`lang = "es"` in [`.module-map.toml`](#%EF%B8%8F-configuration).
+
+```bash
+module-map feature/login --lang es
+module-diagrams feature/login --lang es
+```
+
+```
+generado: feature/login/docs/architecture/feature-login.md
+```
+
+</details>
+
+The full list of options for each command is under [Options](#%EF%B8%8F-options).
 
 ---
 
