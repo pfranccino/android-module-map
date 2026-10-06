@@ -71,8 +71,9 @@ def test_index_page_opens_modules_in_the_same_page():
     data = json.loads(page.split('id="data">', 1)[1].split("</script>", 1)[0])
     assert 'click n1 href "#feature/login"' in data["home"]
     assert "[:feature:login](#feature/login)" in data["home"]
-    assert data["modules"]["feature/login"] == {"path": ":feature:login", "file": "feature-login.md",
-                                                "markdown": "# login"}
+    login = data["modules"]["feature/login"]
+    assert (login["path"], login["file"], login["markdown"]) == (":feature:login", "feature-login.md", "# login")
+    assert login["summary"]["meta"][0] == "android-library"
     assert "<title>Acme: modules</title>" in page
 
 
@@ -80,6 +81,26 @@ def test_index_page_text_cannot_close_its_script():
     maps = [md.Map(load("app")), md.Map(load("core-network"))]
     page = md.build_html(maps, ["</script><script>alert(1)</script>", "x"], ["a.md", "b.md"], "Acme")
     assert page.count("</script>") == 2  # the data block and the viewer, nothing from the text
+
+
+def test_module_page_shows_the_document_of_a_single_module():
+    m = md.Map(load("feature-login"))
+    text = md.build(m, None, list(md.SECTIONS))[0]
+    page = md.build_module_html(m, text, "feature-login.md", "en")
+    data = json.loads(page.split('id="data">', 1)[1].split("</script>", 1)[0])
+    assert data["home"] == text
+    assert data["file"] == "feature-login.md"
+    assert data["modules"] == {}
+    assert "<title>:feature:login</title>" in page
+    assert page.count("</script>") == 2
+
+
+def test_module_page_summary_counts_what_the_document_lists():
+    summary = md.page_summary(md.Map(load("feature-login")))
+    assert summary["meta"] == ["android-library", "com.acme.login"]
+    assert summary["classes"]["layers"] == [["Presentation", 9], ["Domain", 3], ["Data", 5], ["DI", 1]]
+    assert [(fact["section"], fact["count"]) for fact in summary["facts"]] == [
+        ("Layer violations", 0), ("Edges to review", 2), ("External dependencies", 5)]
 
 
 # ---------- layers ----------

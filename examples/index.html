@@ -5,93 +5,707 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Acme: modules</title>
 <style>
-  :root { color-scheme: light; --text: #0f172a; --muted: #475569; --line: #e2e8f0; --accent: #2563eb; }
-  body { margin: 0; background: #ffffff; color: var(--text);
-         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  nav { position: sticky; top: 0; display: flex; gap: 16px; align-items: center; padding: 10px 16px;
-        background: #f8fafc; border-bottom: 1px solid var(--line); }
-  nav[hidden] { display: none; }
-  nav strong { flex: 1; font-family: ui-monospace, Consolas, monospace; }
-  a { color: var(--accent); }
-  main { max-width: 1100px; margin: 0 auto; padding: 8px 16px 48px; }
-  h1 { font-size: 1.6em; } h2 { margin-top: 2em; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
-  table { border-collapse: collapse; display: block; overflow-x: auto; }
-  th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
-  th { background: #f8fafc; }
-  code { font-family: ui-monospace, Consolas, monospace; font-size: 0.92em; }
-  pre { overflow-x: auto; background: #f8fafc; padding: 12px; border-radius: 6px; }
-  pre.mermaid { background: none; text-align: center; }
-  pre.mermaid svg .clickable { cursor: pointer; }
-  .notice { padding: 10px 12px; background: #fef3c7; border-radius: 6px; }
+  :root {
+    color-scheme: light;
+    --ground: #ffffff; --panel: #f5f6f8; --canvas: #fafbfc; --hover: #eceef2;
+    --ink: #111827; --ink-2: #4b5563; --ink-3: #5f6673;
+    --line: #e4e7eb; --line-2: #d0d5dc; --dot: #dde1e6;
+    --accent: #1f5fd1; --accent-wash: #e8effc;
+    --bad: #b42318; --warn: #a15c07;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+    --side: 252px; --bar: 0px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: calc(var(--bar) + 16px); }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 15px/1.6 var(--sans);
+         -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  body.locked { overflow: hidden; }
+  ::selection { background: #cddcf7; color: var(--ink); }
+  * { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  svg.icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75;
+             stroke-linecap: round; stroke-linejoin: round; }
+
+  .shell { display: grid; grid-template-columns: var(--side) minmax(0, 1fr); min-height: 100vh; }
+  aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column;
+          gap: 22px; padding: 22px 14px 20px; background: var(--panel); border-right: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 0 10px; font-size: 13px; font-weight: 600;
+           color: var(--ink-2); }
+  .brand svg { width: 18px; height: 18px; flex: none; }
+  .back { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin: -10px 0 -6px;
+          border-radius: 6px; font-size: 13.5px; font-weight: 500; text-decoration: none; }
+  .back:hover { background: var(--hover); }
+  .back[hidden], .file[hidden], .toc-title[hidden] { display: none; }
+  .toc-title { margin: 0 0 6px; padding: 0 10px; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+  .toc ol { margin: 0; padding: 0; list-style: none; }
+  .toc button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 5px 10px;
+                border-radius: 6px; font-size: 13.5px; line-height: 1.35; color: var(--ink-2); cursor: pointer; }
+  .toc button:hover { background: var(--hover); color: var(--ink); }
+  .toc button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .toc button[aria-current="true"] { background: var(--ground); color: var(--ink); font-weight: 600;
+                                     box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgba(17, 24, 39, .06); }
+  .file { display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 0 10px; font-size: 13px; }
+
+  main { min-width: 0; padding: 44px 48px 120px; }
+  .doc { max-width: 1080px; margin: 0 auto; overflow-wrap: break-word; }
+  .top h1 { margin: 0; font-size: 28px; line-height: 1.2; font-weight: 650; letter-spacing: -0.018em;
+            text-wrap: balance; overflow-wrap: anywhere; }
+  .meta { display: flex; flex-wrap: wrap; margin-top: 8px; font-size: 13.5px; color: var(--ink-2); }
+  .meta span + span::before { content: "/"; margin: 0 10px; color: var(--line-2); }
+  .top .intro { margin: 10px 0 0; max-width: 75ch; font-size: 13.5px; color: var(--ink-3); }
+
+  .summary { display: grid; grid-template-columns: minmax(0, 1.7fr) repeat(3, minmax(0, 1fr)); margin-top: 26px;
+             border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .stat { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; min-width: 0;
+          padding: 16px 18px 15px; }
+  .stat + .stat { border-left: 1px solid var(--line); }
+  button.stat { cursor: pointer; transition: background-color 150ms ease-out; }
+  button.stat:hover { background: var(--canvas); }
+  button.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .stat-label { font-size: 12.5px; color: var(--ink-2); }
+  .stat-value { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 600; line-height: 1.3;
+                font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .stat[data-alert="bad"] .stat-value { color: var(--bad); }
+  .stat[data-alert="warn"] .stat-value { color: var(--warn); }
+  .stat[data-alert] .stat-value::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .bar { display: flex; gap: 2px; height: 8px; margin: 10px 0 8px; border-radius: 4px; overflow: hidden; }
+  .bar i { background: var(--c); }
+  .legend { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12.5px; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .legend span::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--c); }
+  .legend b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .doc h2 { margin: 60px 0 10px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 19px;
+            line-height: 1.3; font-weight: 650; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+  .doc h2:focus { outline: none; }
+  .doc > h1 { font-size: 28px; line-height: 1.2; letter-spacing: -0.018em; }
+  .doc p, .doc ul { max-width: 75ch; }
+  .doc h2 + p { color: var(--ink-2); font-size: 14px; }
+  .doc p:has(> strong:only-child) { margin: 26px 0 0; font-size: 14px; }
+  .doc strong { font-weight: 600; }
+  .doc ul { padding-left: 20px; }
+  .doc li { margin: 8px 0; }
+  .doc li::marker { color: var(--ink-3); }
+  .doc code { padding: 1px 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel);
+              font: 0.86em/1.5 var(--mono); overflow-wrap: anywhere; }
+  .doc pre { overflow-x: auto; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px;
+             background: var(--canvas); font: 13px/1.55 var(--mono); }
+  .doc pre code { padding: 0; border: 0; background: none; font-size: inherit; }
+
+  .table { margin: 14px 0 22px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  th { padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--panel); text-align: left;
+       font-size: 12.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: var(--canvas); }
+  .layer { display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px 1px 7px; border-radius: 999px;
+           background: var(--fill); font-size: 12.5px; white-space: nowrap; }
+  .layer::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+
+  .diagram { position: relative; margin: 16px 0 26px; overflow: hidden; border: 1px solid var(--line);
+             border-radius: 12px; background: var(--canvas); }
+  .stage { position: relative; height: 320px; overflow: hidden; cursor: grab; touch-action: pan-y;
+           background-image: radial-gradient(circle, var(--dot) 1px, transparent 1.3px); background-size: 18px 18px; }
+  .stage:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 12px; }
+  .stage.dragging { cursor: grabbing; }
+  .canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+  .canvas.ease { transition: transform 220ms cubic-bezier(.16, 1, .3, 1); }
+  .canvas svg { display: block; max-width: none; }
+  .tools { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; align-items: center; gap: 2px;
+           padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground);
+           box-shadow: 0 1px 2px rgba(17, 24, 39, .05), 0 6px 16px -6px rgba(17, 24, 39, .12); }
+  .tools button { all: unset; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px;
+                  color: var(--ink-2); cursor: pointer; }
+  .tools button:hover { background: var(--panel); color: var(--ink); }
+  .tools button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .tools output { min-width: 46px; font-size: 12px; text-align: center; color: var(--ink-2);
+                  font-variant-numeric: tabular-nums; }
+  .tools .rule { width: 1px; height: 16px; margin: 0 3px; background: var(--line); }
+  .diagram.expanded { position: fixed; inset: 20px; z-index: 50; margin: 0;
+                      box-shadow: 0 30px 80px -20px rgba(17, 24, 39, .45); }
+  .diagram.expanded .stage { height: 100%; touch-action: none; }
+  .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(17, 24, 39, .4); }
+  .scrim[hidden] { display: none; }
+  .notice { max-width: 75ch; padding: 12px 14px; border: 1px solid #f3d38a; border-radius: 10px;
+            background: #fffaeb; color: #6b3d05; }
+
+  @media (max-width: 900px) {
+    :root { --bar: 49px; }
+    .shell { display: block; }
+    aside { z-index: 30; height: var(--bar); flex-direction: row; align-items: center; gap: 6px; padding: 0 10px;
+            overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line);
+            scrollbar-width: none; }
+    .brand, .file, .toc-title { display: none; }
+    .back { margin: 0; flex: none; }
+    .toc ol { display: flex; gap: 4px; }
+    .toc button { white-space: nowrap; }
+    main { padding: 26px 16px 80px; }
+    .top h1, .doc > h1 { font-size: 23px; }
+    .summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .summary .stat:first-child { grid-column: 1 / -1; border-bottom: 1px solid var(--line); }
+    .summary .stat:nth-child(2) { border-left: 0; }
+    .stat { padding: 13px 14px; }
+    .stat-value { font-size: 19px; }
+    .doc h2 { margin-top: 44px; }
+    .diagram.expanded { inset: 0; border: 0; border-radius: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .canvas.ease, button.stat { transition: none; }
+  }
 </style>
 </head>
 <body>
-<nav id="nav" hidden><a href="#">← All modules</a><strong id="module"></strong><a id="file" href="">Open the .md</a></nav>
-<main id="main"></main>
+<div class="shell">
+  <aside>
+    <div class="brand">
+      <svg viewBox="0 0 18 18" aria-hidden="true"><rect x="1" y="2" width="16" height="3.5" rx="1.2" fill="#2563eb"/><rect x="1" y="7.25" width="16" height="3.5" rx="1.2" fill="#16a34a"/><rect x="1" y="12.5" width="16" height="3.5" rx="1.2" fill="#d97706"/></svg>
+      <span>android-module-map</span>
+    </div>
+    <a class="back" id="back" href="#" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>All modules</a>
+    <nav class="toc" aria-labelledby="toc-title">
+      <p class="toc-title" id="toc-title" hidden>On this page</p>
+      <ol id="toc"></ol>
+    </nav>
+    <a class="file" id="file" href="" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>Open the .md</a>
+  </aside>
+  <main><article class="doc" id="doc"></article></main>
+</div>
+<div class="scrim" id="scrim" hidden></div>
 <script type="application/json" id="data">{
  "title": "Acme: modules",
  "home": "# Acme: modules\n\nGenerated by `module_diagrams.py` from 3 maps. Do not edit by hand.\n\n## Module dependencies\n\nOnly dependencies declared in Gradle between the modules of this group. An arrow without a label is `implementation`. Dependencies on other modules, usages in the code and the class-level detail are in the document of each module.\n\n```mermaid\ngraph LR\n    n0[\":app\"]\n    n1[\":core:network\"]\n    n2[\":feature:login\"]\n    n0 --> n2\n    n2 --> n1\n    click n0 href \"#app\"\n    click n1 href \"#core/network\"\n    click n2 href \"#feature/login\"\n```\n\n## Modules\n\nA click on a module, in the graph or in the table, opens its document.\n\n| Module | Type | Nodes | Depends on (in this group) | Other modules |\n|---|---|---|---|---|\n| [:app](#app) | android-application | 1 | :feature:login | 0 |\n| [:core:network](#core/network) | android-library | 1 | - | 0 |\n| [:feature:login](#feature/login) | android-library | 19 | :core:network | 1 |\n",
+ "file": null,
+ "summary": null,
  "modules": {
   "app": {
    "path": ":app",
    "file": "app.md",
-   "markdown": "# :app: architecture\n\nGenerated by `module_diagrams.py` from the map of 2026-10-02T23:39:02+00:00. 1 nodes and 1 edges. Do not edit by hand: it is regenerated from the map.\n\n## Layered architecture\n\nSolid arrow: depends on or calls. Dotted arrow: type relationship.\n\n```mermaid\ngraph TD\n    subgraph Presentation\n        n0[\"MainNav\"]\n    end\n    subgraph ext_modules[\"Other modules\"]\n        n1[\"LoginScreen\u003cbr/>:feature:login\"]\n    end\n    n0 --> n1\n    classDef layerPresentation fill:#dbeafe,stroke:#2563eb,color:#0f172a\n    class n0 layerPresentation\n    classDef external fill:#ffffff,stroke:#94a3b8,stroke-dasharray:4,color:#334155\n    class n1 external\n```\n\n## Flows from the ViewModels\n\nThe map has no reliable calls from a ViewModel of this module.\n\n## Sequence: MainNav.MainNav\n\n```mermaid\nsequenceDiagram\n    participant n0 as MainNav\n    participant n1 as LoginScreen\n    Note over n0: MainNav()\n    n0->>n1: LoginScreen()\n```\n\nOnly calls between classes, in line order. Branches, loops and asynchrony are not shown; pick another flow with `--flow Class.function`.\n\n## Module dependencies\n\nOutgoing: declared in Gradle. Incoming (`uses`): usages observed in the code.\n\n```mermaid\ngraph LR\n    n0[\":app\"]\n    n0 -->|implementation| n1[\":feature:login\"]\n```\n\n## Dependency injection\n\nThe map has no `@Provides`, `@Binds` or `@Inject` dependencies.\n\n## Classes\n\n| Class | Kind | Layer | Role | Responsibility (KDoc) |\n|---|---|---|---|---|\n| MainNav | function | Presentation | composable | (no KDoc) |\n\n## Layer violations\n\nNo violations found. Every edge between classes of the module was checked against these forbidden dependencies: Data → Presentation, Domain → Data, Domain → Presentation, Presentation → Data.\n\n## Entry points\n\nThe map has no Manifest components and no usages from other modules.\n\n## External dependencies\n\n| Origin | External type | Used by |\n|---|---|---|\n| :feature:login | com.acme.login.ui.LoginScreen | MainNav |\n\n## Edges to review\n\nNothing to review.\n"
+   "markdown": "# :app: architecture\n\nGenerated by `module_diagrams.py` from the map of 2026-10-02T23:39:02+00:00. 1 nodes and 1 edges. Do not edit by hand: it is regenerated from the map.\n\n## Layered architecture\n\nSolid arrow: depends on or calls. Dotted arrow: type relationship.\n\n```mermaid\ngraph TD\n    subgraph Presentation\n        n0[\"MainNav\"]\n    end\n    subgraph ext_modules[\"Other modules\"]\n        n1[\"LoginScreen\u003cbr/>:feature:login\"]\n    end\n    n0 --> n1\n    classDef layerPresentation fill:#dbeafe,stroke:#2563eb,color:#0f172a\n    class n0 layerPresentation\n    classDef external fill:#ffffff,stroke:#94a3b8,stroke-dasharray:4,color:#334155\n    class n1 external\n```\n\n## Flows from the ViewModels\n\nThe map has no reliable calls from a ViewModel of this module.\n\n## Sequence: MainNav.MainNav\n\n```mermaid\nsequenceDiagram\n    participant n0 as MainNav\n    participant n1 as LoginScreen\n    Note over n0: MainNav()\n    n0->>n1: LoginScreen()\n```\n\nOnly calls between classes, in line order. Branches, loops and asynchrony are not shown; pick another flow with `--flow Class.function`.\n\n## Module dependencies\n\nOutgoing: declared in Gradle. Incoming (`uses`): usages observed in the code.\n\n```mermaid\ngraph LR\n    n0[\":app\"]\n    n0 -->|implementation| n1[\":feature:login\"]\n```\n\n## Dependency injection\n\nThe map has no `@Provides`, `@Binds` or `@Inject` dependencies.\n\n## Classes\n\n| Class | Kind | Layer | Role | Responsibility (KDoc) |\n|---|---|---|---|---|\n| MainNav | function | Presentation | composable | (no KDoc) |\n\n## Layer violations\n\nNo violations found. Every edge between classes of the module was checked against these forbidden dependencies: Data → Presentation, Domain → Data, Domain → Presentation, Presentation → Data.\n\n## Entry points\n\nThe map has no Manifest components and no usages from other modules.\n\n## External dependencies\n\n| Origin | External type | Used by |\n|---|---|---|\n| :feature:login | com.acme.login.ui.LoginScreen | MainNav |\n\n## Edges to review\n\nNothing to review.\n",
+   "summary": {
+    "meta": [
+     "android-application"
+    ],
+    "classes": {
+     "label": "Classes",
+     "section": "Classes",
+     "layers": [
+      [
+       "Presentation",
+       1
+      ]
+     ]
+    },
+    "facts": [
+     {
+      "label": "Layer violations",
+      "count": 0,
+      "section": "Layer violations",
+      "alert": "bad"
+     },
+     {
+      "label": "Edges to review",
+      "count": 0,
+      "section": "Edges to review",
+      "alert": "warn"
+     },
+     {
+      "label": "External types used",
+      "count": 1,
+      "section": "External dependencies",
+      "alert": ""
+     }
+    ]
+   }
   },
   "core/network": {
    "path": ":core:network",
    "file": "core-network.md",
-   "markdown": "# :core:network: architecture\n\nGenerated by `module_diagrams.py` from the map of 2026-10-02T23:39:02+00:00. 1 nodes and 2 edges. Do not edit by hand: it is regenerated from the map.\n\n## Layered architecture\n\nSolid arrow: depends on or calls. Dotted arrow: type relationship.\n\n```mermaid\ngraph TD\n    subgraph Data\n        n0[\"ApiClient\"]\n    end\n    classDef layerData fill:#fef3c7,stroke:#d97706,color:#0f172a\n    class n0 layerData\n```\n\n## Flows from the ViewModels\n\nThe map has no reliable calls from a ViewModel of this module.\n\n## Sequence\n\nThe map has no calls (`calls`) leaving this module, so there is no flow to draw. Calls come from codegraph: check under \"Edges to review\" whether it was used.\n\n## Module dependencies\n\nOutgoing: declared in Gradle. Incoming (`uses`): usages observed in the code.\n\n```mermaid\ngraph LR\n    n0[\":core:network\"]\n    n1[\":feature:login\"] -->|uses| n0\n```\n\n## Dependency injection\n\nThe map has no `@Provides`, `@Binds` or `@Inject` dependencies.\n\n## Classes\n\n| Class | Kind | Layer | Role | Responsibility (KDoc) |\n|---|---|---|---|---|\n| ApiClient | class | Data | - | (no KDoc) |\n\n## Layer violations\n\nNo violations found. Every edge between classes of the module was checked against these forbidden dependencies: Data → Presentation, Domain → Data, Domain → Presentation, Presentation → Data.\n\n## Entry points\n\n**Used from other modules**\n\n| Element of this module | Used by | Module | Kind |\n|---|---|---|---|\n| ApiClient | AuthRepositoryImpl | :feature:login | calls |\n| ApiClient | LoginModule | :feature:login | calls |\n\n## External dependencies\n\nThe map has no external dependencies.\n\n## Edges to review\n\nNothing to review.\n"
+   "markdown": "# :core:network: architecture\n\nGenerated by `module_diagrams.py` from the map of 2026-10-02T23:39:02+00:00. 1 nodes and 2 edges. Do not edit by hand: it is regenerated from the map.\n\n## Layered architecture\n\nSolid arrow: depends on or calls. Dotted arrow: type relationship.\n\n```mermaid\ngraph TD\n    subgraph Data\n        n0[\"ApiClient\"]\n    end\n    classDef layerData fill:#fef3c7,stroke:#d97706,color:#0f172a\n    class n0 layerData\n```\n\n## Flows from the ViewModels\n\nThe map has no reliable calls from a ViewModel of this module.\n\n## Sequence\n\nThe map has no calls (`calls`) leaving this module, so there is no flow to draw. Calls come from codegraph: check under \"Edges to review\" whether it was used.\n\n## Module dependencies\n\nOutgoing: declared in Gradle. Incoming (`uses`): usages observed in the code.\n\n```mermaid\ngraph LR\n    n0[\":core:network\"]\n    n1[\":feature:login\"] -->|uses| n0\n```\n\n## Dependency injection\n\nThe map has no `@Provides`, `@Binds` or `@Inject` dependencies.\n\n## Classes\n\n| Class | Kind | Layer | Role | Responsibility (KDoc) |\n|---|---|---|---|---|\n| ApiClient | class | Data | - | (no KDoc) |\n\n## Layer violations\n\nNo violations found. Every edge between classes of the module was checked against these forbidden dependencies: Data → Presentation, Domain → Data, Domain → Presentation, Presentation → Data.\n\n## Entry points\n\n**Used from other modules**\n\n| Element of this module | Used by | Module | Kind |\n|---|---|---|---|\n| ApiClient | AuthRepositoryImpl | :feature:login | calls |\n| ApiClient | LoginModule | :feature:login | calls |\n\n## External dependencies\n\nThe map has no external dependencies.\n\n## Edges to review\n\nNothing to review.\n",
+   "summary": {
+    "meta": [
+     "android-library"
+    ],
+    "classes": {
+     "label": "Classes",
+     "section": "Classes",
+     "layers": [
+      [
+       "Data",
+       1
+      ]
+     ]
+    },
+    "facts": [
+     {
+      "label": "Layer violations",
+      "count": 0,
+      "section": "Layer violations",
+      "alert": "bad"
+     },
+     {
+      "label": "Edges to review",
+      "count": 0,
+      "section": "Edges to review",
+      "alert": "warn"
+     },
+     {
+      "label": "External types used",
+      "count": 0,
+      "section": "External dependencies",
+      "alert": ""
+     }
+    ]
+   }
   },
   "feature/login": {
    "path": ":feature:login",
    "file": "feature-login.md",
-   "markdown": "# :feature:login: architecture\n\nGenerated by `module_diagrams.py` from the map of 2026-10-02T23:39:02+00:00. 19 nodes and 42 edges. Do not edit by hand: it is regenerated from the map.\n\n## Layered architecture\n\nSolid arrow: depends on or calls. Dotted arrow: type relationship.\n\n```mermaid\ngraph TD\n    subgraph Presentation\n        n2[\"LoginActivity\"]\n        n3[\"LoginScreen\"]\n        n4[\"LoginForm\"]\n        n5[\"LoginViewModel\"]\n    end\n    subgraph Domain\n        n0[\"AuthRepository\"]\n        n6[\"LoginUseCase\"]\n    end\n    subgraph Data\n        n7[\"AuthApi\"]\n        n1[\"AuthRepositoryImpl\"]\n        n8[\"SessionStore\"]\n    end\n    subgraph DI\n        n9[\"LoginModule\"]\n    end\n    subgraph ext_modules[\"Other modules\"]\n        n10[\"ApiClient\u003cbr/>:core:network\"]\n    end\n    n1 --> n10\n    n1 --> n7\n    n1 --> n8\n    n2 --> n3\n    n3 --> n4\n    n3 --> n5\n    n5 --> n6\n    n6 --> n0\n    n9 --> n10\n    n0 -.implemented by.-> n1\n    classDef layerPresentation fill:#dbeafe,stroke:#2563eb,color:#0f172a\n    class n2,n3,n4,n5 layerPresentation\n    classDef layerDomain fill:#dcfce7,stroke:#16a34a,color:#0f172a\n    class n0,n6 layerDomain\n    classDef layerData fill:#fef3c7,stroke:#d97706,color:#0f172a\n    class n7,n1,n8 layerData\n    classDef layerDI fill:#f3e8ff,stroke:#9333ea,color:#0f172a\n    class n9 layerDI\n    classDef external fill:#ffffff,stroke:#94a3b8,stroke-dasharray:4,color:#334155\n    class n10 external\n```\n\n## Flows from the ViewModels\n\nThe label of each arrow leaving a ViewModel is the function that starts the call. Each implementation is drawn as its interface. Only calls inside the module that the AST confirmed through the receiver type, or that codegraph resolved with confidence 0.9 or more.\n\n```mermaid\ngraph LR\n    n0[\"LoginViewModel\"]\n    n1[\"LoginUseCase\"]\n    n2[\"AuthRepository\"]\n    n3[\"AuthApi\"]\n    n4[\"SessionStore\"]\n    n0 -->|\"submit\"| n1\n    n1 --> n2\n    n2 --> n3\n    n2 --> n4\n    classDef layerPresentation fill:#dbeafe,stroke:#2563eb,color:#0f172a\n    class n0 layerPresentation\n    classDef layerDomain fill:#dcfce7,stroke:#16a34a,color:#0f172a\n    class n1,n2 layerDomain\n    classDef layerData fill:#fef3c7,stroke:#d97706,color:#0f172a\n    class n3,n4 layerData\n```\n\n## Sequence: LoginViewModel.submit\n\n```mermaid\nsequenceDiagram\n    participant n0 as LoginViewModel\n    participant n1 as LoginUseCase\n    participant n2 as AuthRepository\n    participant n3 as AuthRepositoryImpl\n    participant n4 as AuthApi\n    participant n5 as toSession\n    participant n6 as SessionStore\n    Note over n0: submit()\n    n0->>n1: invoke()\n    n1->>n2: login()\n    n2-->>n3: implemented by\n    n3->>n4: login()\n    n3->>n5: toSession()\n    n3->>n6: save()\n```\n\nOnly calls between classes, in line order. Branches, loops and asynchrony are not shown; pick another flow with `--flow Class.function`.\n\n## Module dependencies\n\nOutgoing: declared in Gradle. Incoming (`uses`): usages observed in the code.\n\n```mermaid\ngraph LR\n    n0[\":feature:login\"]\n    n1[\":app\"] -->|uses| n0\n    n0 -->|api| n2[\":core:model\"]\n    n0 -->|implementation| n3[\":core:network\"]\n```\n\n## Dependency injection\n\n```mermaid\ngraph LR\n    n0[\"LoginModule\"]\n    n1[\"AuthRepository\"]\n    n2[\"AuthApi\"]\n    n3[\"AuthRepositoryImpl\"]\n    n4[\"SessionStore\"]\n    n5[\"LoginUseCase\"]\n    n6[\"LoginViewModel\u003cbr/>@HiltViewModel\"]\n    subgraph outside[\"Provided outside this module\"]\n        n7[\"ApiClient\"]\n    end\n    n0 -->|\"@Binds\"| n1\n    n1 -.implemented by.-> n3\n    n0 -->|\"@Provides\"| n2\n    n3 -->|injects| n2\n    n3 -->|injects| n7\n    n3 -->|injects| n4\n    n5 -->|injects| n1\n    n6 -->|injects| n5\n```\n\n## Classes\n\n| Class | Kind | Layer | Role | Responsibility (KDoc) |\n|---|---|---|---|---|\n| LoginActivity | class | Presentation | activity | (no KDoc) |\n| LoginScreen | function | Presentation | composable | (no KDoc) |\n| LoginForm | function | Presentation | composable | (no KDoc) |\n| LoginViewModel | class | Presentation | viewmodel | Coordina el flujo de inicio de sesión y expone el estado a la UI. |\n| LoginUiState | sealed interface | Presentation | - | (no KDoc) |\n| LoginUiState.Idle | data object | Presentation | - | (no KDoc) |\n| LoginUiState.Loading | data object | Presentation | - | (no KDoc) |\n| LoginUiState.Success | data class | Presentation | - | (no KDoc) |\n| LoginUiState.Error | data class | Presentation | - | (no KDoc) |\n| Session | data class | Domain | - | (no KDoc) |\n| AuthRepository | interface | Domain | repository | (no KDoc) |\n| LoginUseCase | class | Domain | usecase | (no KDoc) |\n| AuthApi | interface | Data | api_service | (no KDoc) |\n| LoginRequest | data class | Data | - | (no KDoc) |\n| LoginResponse | data class | Data | - | (no KDoc) |\n| AuthRepositoryImpl | class | Data | repository | (no KDoc) |\n| SessionStore | class | Data | - | (no KDoc) |\n| LoginModule | abstract class | DI | di_module | (no KDoc) |\n\n## Layer violations\n\nNo violations found. Every edge between classes of the module was checked against these forbidden dependencies: Data → Presentation, Domain → Data, Domain → Presentation, Presentation → Data.\n\n## Entry points\n\n**Manifest components**\n\n| Type | Class | Exported |\n|---|---|---|\n| activity | com.acme.login.ui.LoginActivity | yes |\n\n**Used from other modules**\n\n| Element of this module | Used by | Module | Kind |\n|---|---|---|---|\n| LoginScreen | MainNav | :app | calls |\n\n## External dependencies\n\n| Origin | External type | Used by |\n|---|---|---|\n| :core:network | com.acme.network.ApiClient | AuthRepositoryImpl, LoginModule |\n| library | android.os.Bundle | LoginActivity |\n| library | androidx.activity.ComponentActivity | LoginActivity |\n| library | androidx.lifecycle.ViewModel | LoginViewModel |\n| library | kotlinx.coroutines.flow.StateFlow | LoginViewModel |\n\nDeclared in Gradle with no usage seen in the Kotlin code (the map does not see resources or generated code, so this does not mean they are unneeded): :core:model.\n\n## Edges to review\n\n- Confidence 0.7: `AuthRepositoryImpl → toSession` (calls: login → toSession, feature/login/src/main/kotlin/com/acme/login/data/AuthRepositoryImpl.kt:26). Resolved by name; check it in the code.\n- Corrected: `LoginViewModel → LoginUseCase` (submit → invoke, feature/login/src/main/kotlin/com/acme/login/ui/LoginViewModel.kt:28). codegraph proposed `AuthApi`; the declared type of the receiver was used instead.\n"
+   "markdown": "# :feature:login: architecture\n\nGenerated by `module_diagrams.py` from the map of 2026-10-02T23:39:02+00:00. 19 nodes and 42 edges. Do not edit by hand: it is regenerated from the map.\n\n## Layered architecture\n\nSolid arrow: depends on or calls. Dotted arrow: type relationship.\n\n```mermaid\ngraph TD\n    subgraph Presentation\n        n2[\"LoginActivity\"]\n        n3[\"LoginScreen\"]\n        n4[\"LoginForm\"]\n        n5[\"LoginViewModel\"]\n    end\n    subgraph Domain\n        n0[\"AuthRepository\"]\n        n6[\"LoginUseCase\"]\n    end\n    subgraph Data\n        n7[\"AuthApi\"]\n        n1[\"AuthRepositoryImpl\"]\n        n8[\"SessionStore\"]\n    end\n    subgraph DI\n        n9[\"LoginModule\"]\n    end\n    subgraph ext_modules[\"Other modules\"]\n        n10[\"ApiClient\u003cbr/>:core:network\"]\n    end\n    n1 --> n10\n    n1 --> n7\n    n1 --> n8\n    n2 --> n3\n    n3 --> n4\n    n3 --> n5\n    n5 --> n6\n    n6 --> n0\n    n9 --> n10\n    n0 -.implemented by.-> n1\n    classDef layerPresentation fill:#dbeafe,stroke:#2563eb,color:#0f172a\n    class n2,n3,n4,n5 layerPresentation\n    classDef layerDomain fill:#dcfce7,stroke:#16a34a,color:#0f172a\n    class n0,n6 layerDomain\n    classDef layerData fill:#fef3c7,stroke:#d97706,color:#0f172a\n    class n7,n1,n8 layerData\n    classDef layerDI fill:#f3e8ff,stroke:#9333ea,color:#0f172a\n    class n9 layerDI\n    classDef external fill:#ffffff,stroke:#94a3b8,stroke-dasharray:4,color:#334155\n    class n10 external\n```\n\n## Flows from the ViewModels\n\nThe label of each arrow leaving a ViewModel is the function that starts the call. Each implementation is drawn as its interface. Only calls inside the module that the AST confirmed through the receiver type, or that codegraph resolved with confidence 0.9 or more.\n\n```mermaid\ngraph LR\n    n0[\"LoginViewModel\"]\n    n1[\"LoginUseCase\"]\n    n2[\"AuthRepository\"]\n    n3[\"AuthApi\"]\n    n4[\"SessionStore\"]\n    n0 -->|\"submit\"| n1\n    n1 --> n2\n    n2 --> n3\n    n2 --> n4\n    classDef layerPresentation fill:#dbeafe,stroke:#2563eb,color:#0f172a\n    class n0 layerPresentation\n    classDef layerDomain fill:#dcfce7,stroke:#16a34a,color:#0f172a\n    class n1,n2 layerDomain\n    classDef layerData fill:#fef3c7,stroke:#d97706,color:#0f172a\n    class n3,n4 layerData\n```\n\n## Sequence: LoginViewModel.submit\n\n```mermaid\nsequenceDiagram\n    participant n0 as LoginViewModel\n    participant n1 as LoginUseCase\n    participant n2 as AuthRepository\n    participant n3 as AuthRepositoryImpl\n    participant n4 as AuthApi\n    participant n5 as toSession\n    participant n6 as SessionStore\n    Note over n0: submit()\n    n0->>n1: invoke()\n    n1->>n2: login()\n    n2-->>n3: implemented by\n    n3->>n4: login()\n    n3->>n5: toSession()\n    n3->>n6: save()\n```\n\nOnly calls between classes, in line order. Branches, loops and asynchrony are not shown; pick another flow with `--flow Class.function`.\n\n## Module dependencies\n\nOutgoing: declared in Gradle. Incoming (`uses`): usages observed in the code.\n\n```mermaid\ngraph LR\n    n0[\":feature:login\"]\n    n1[\":app\"] -->|uses| n0\n    n0 -->|api| n2[\":core:model\"]\n    n0 -->|implementation| n3[\":core:network\"]\n```\n\n## Dependency injection\n\n```mermaid\ngraph LR\n    n0[\"LoginModule\"]\n    n1[\"AuthRepository\"]\n    n2[\"AuthApi\"]\n    n3[\"AuthRepositoryImpl\"]\n    n4[\"SessionStore\"]\n    n5[\"LoginUseCase\"]\n    n6[\"LoginViewModel\u003cbr/>@HiltViewModel\"]\n    subgraph outside[\"Provided outside this module\"]\n        n7[\"ApiClient\"]\n    end\n    n0 -->|\"@Binds\"| n1\n    n1 -.implemented by.-> n3\n    n0 -->|\"@Provides\"| n2\n    n3 -->|injects| n2\n    n3 -->|injects| n7\n    n3 -->|injects| n4\n    n5 -->|injects| n1\n    n6 -->|injects| n5\n```\n\n## Classes\n\n| Class | Kind | Layer | Role | Responsibility (KDoc) |\n|---|---|---|---|---|\n| LoginActivity | class | Presentation | activity | (no KDoc) |\n| LoginScreen | function | Presentation | composable | (no KDoc) |\n| LoginForm | function | Presentation | composable | (no KDoc) |\n| LoginViewModel | class | Presentation | viewmodel | Coordina el flujo de inicio de sesión y expone el estado a la UI. |\n| LoginUiState | sealed interface | Presentation | - | (no KDoc) |\n| LoginUiState.Idle | data object | Presentation | - | (no KDoc) |\n| LoginUiState.Loading | data object | Presentation | - | (no KDoc) |\n| LoginUiState.Success | data class | Presentation | - | (no KDoc) |\n| LoginUiState.Error | data class | Presentation | - | (no KDoc) |\n| Session | data class | Domain | - | (no KDoc) |\n| AuthRepository | interface | Domain | repository | (no KDoc) |\n| LoginUseCase | class | Domain | usecase | (no KDoc) |\n| AuthApi | interface | Data | api_service | (no KDoc) |\n| LoginRequest | data class | Data | - | (no KDoc) |\n| LoginResponse | data class | Data | - | (no KDoc) |\n| AuthRepositoryImpl | class | Data | repository | (no KDoc) |\n| SessionStore | class | Data | - | (no KDoc) |\n| LoginModule | abstract class | DI | di_module | (no KDoc) |\n\n## Layer violations\n\nNo violations found. Every edge between classes of the module was checked against these forbidden dependencies: Data → Presentation, Domain → Data, Domain → Presentation, Presentation → Data.\n\n## Entry points\n\n**Manifest components**\n\n| Type | Class | Exported |\n|---|---|---|\n| activity | com.acme.login.ui.LoginActivity | yes |\n\n**Used from other modules**\n\n| Element of this module | Used by | Module | Kind |\n|---|---|---|---|\n| LoginScreen | MainNav | :app | calls |\n\n## External dependencies\n\n| Origin | External type | Used by |\n|---|---|---|\n| :core:network | com.acme.network.ApiClient | AuthRepositoryImpl, LoginModule |\n| library | android.os.Bundle | LoginActivity |\n| library | androidx.activity.ComponentActivity | LoginActivity |\n| library | androidx.lifecycle.ViewModel | LoginViewModel |\n| library | kotlinx.coroutines.flow.StateFlow | LoginViewModel |\n\nDeclared in Gradle with no usage seen in the Kotlin code (the map does not see resources or generated code, so this does not mean they are unneeded): :core:model.\n\n## Edges to review\n\n- Confidence 0.7: `AuthRepositoryImpl → toSession` (calls: login → toSession, feature/login/src/main/kotlin/com/acme/login/data/AuthRepositoryImpl.kt:26). Resolved by name; check it in the code.\n- Corrected: `LoginViewModel → LoginUseCase` (submit → invoke, feature/login/src/main/kotlin/com/acme/login/ui/LoginViewModel.kt:28). codegraph proposed `AuthApi`; the declared type of the receiver was used instead.\n",
+   "summary": {
+    "meta": [
+     "android-library",
+     "com.acme.login"
+    ],
+    "classes": {
+     "label": "Classes",
+     "section": "Classes",
+     "layers": [
+      [
+       "Presentation",
+       9
+      ],
+      [
+       "Domain",
+       3
+      ],
+      [
+       "Data",
+       5
+      ],
+      [
+       "DI",
+       1
+      ]
+     ]
+    },
+    "facts": [
+     {
+      "label": "Layer violations",
+      "count": 0,
+      "section": "Layer violations",
+      "alert": "bad"
+     },
+     {
+      "label": "Edges to review",
+      "count": 2,
+      "section": "Edges to review",
+      "alert": "warn"
+     },
+     {
+      "label": "External types used",
+      "count": 5,
+      "section": "External dependencies",
+      "alert": ""
+     }
+    ]
+   }
   }
+ },
+ "layers": {
+  "Presentation": {
+   "fill": "#dbeafe",
+   "stroke": "#2563eb"
+  },
+  "Domain": {
+   "fill": "#dcfce7",
+   "stroke": "#16a34a"
+  },
+  "Data": {
+   "fill": "#fef3c7",
+   "stroke": "#d97706"
+  },
+  "DI": {
+   "fill": "#f3e8ff",
+   "stroke": "#9333ea"
+  },
+  "Other": {
+   "fill": "#f1f5f9",
+   "stroke": "#64748b"
+  }
+ },
+ "labels": {
+  "zoom_in": "Zoom in",
+  "zoom_out": "Zoom out",
+  "fit": "Fit to view",
+  "expand": "Expand",
+  "collapse": "Close the expanded view",
+  "diagram": "Diagram. Drag to move it; Ctrl + wheel, or the + and - keys, to zoom."
  },
  "offline": "marked and Mermaid could not be loaded from cdn.jsdelivr.net, so the text is shown without drawing it. A connection is needed to see the diagrams."
 }</script>
 <script type="module">
 const data = JSON.parse(document.getElementById("data").textContent);
-const main = document.getElementById("main");
+const labels = data.labels;
+const doc = document.getElementById("doc");
+const toc = document.getElementById("toc");
+const scrim = document.getElementById("scrim");
+const still = matchMedia("(prefers-reduced-motion: reduce)");
 const escape = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const ICONS = {
+  out: '<path d="M5 12h14"/>',
+  in: '<path d="M12 5v14M5 12h14"/>',
+  fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  expand: '<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>',
+  collapse: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
+};
 let libs = null;
 let shown = 0;
+let heads = [];
+let viewers = [];
+let expanded = null;
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function iconButton(name, label) {
+  const button = el("button");
+  button.type = "button";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">' + ICONS[name] + "</svg>";
+  return button;
+}
 
 async function load() {
   const [{ marked }, { default: mermaid }] = await Promise.all([import("https://cdn.jsdelivr.net/npm/marked@15.0.7/lib/marked.esm.js"), import("https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs")]);
   // Text taken from the code (KDoc, signatures) is shown as text, never as HTML.
   marked.use({ renderer: { html: (token) => escape(token.text) } });
-  mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+  const font = getComputedStyle(document.body).fontFamily;
+  mermaid.initialize({
+    startOnLoad: false, securityLevel: "strict", theme: "base", fontFamily: font,
+    themeVariables: {
+      fontFamily: font, fontSize: "14px", background: "#fafbfc", textColor: "#111827",
+      primaryColor: "#ffffff", primaryBorderColor: "#9aa3af", primaryTextColor: "#111827",
+      secondaryColor: "#f5f6f8", tertiaryColor: "#ffffff", lineColor: "#6b7280",
+      clusterBkg: "#ffffff", clusterBorder: "#d0d5dc", titleColor: "#4b5563", edgeLabelBackground: "#fafbfc",
+      actorBkg: "#ffffff", actorBorder: "#9aa3af", actorTextColor: "#111827", actorLineColor: "#d0d5dc",
+      signalColor: "#4b5563", signalTextColor: "#111827", labelBoxBkgColor: "#ffffff",
+      labelBoxBorderColor: "#d0d5dc", labelTextColor: "#111827", loopTextColor: "#4b5563",
+      noteBkgColor: "#fffaeb", noteBorderColor: "#f3d38a", noteTextColor: "#111827",
+      activationBkgColor: "#e8effc", activationBorderColor: "#1f5fd1",
+    },
+    flowchart: { curve: "basis", padding: 14 },
+    sequence: { mirrorActors: false, actorMargin: 40 },
+  });
   return { marked, mermaid };
 }
+
+function jump(heading) {
+  heading.scrollIntoView({ behavior: still.matches ? "auto" : "smooth", block: "start" });
+  heading.focus({ preventScroll: true });
+}
+
+function headingFor(text) {
+  return heads.find((heading) => heading.textContent === text);
+}
+
+// The module's title, what it is, and the counts worth a look, each one a way into its section.
+function header(summary) {
+  const top = el("header", "top");
+  const title = doc.firstElementChild;
+  if (title && title.tagName === "H1") {
+    const intro = title.nextElementSibling;
+    top.append(title);
+    if (summary && summary.meta.length) {
+      const meta = el("div", "meta");
+      meta.append(...summary.meta.map((value) => el("span", "", value)));
+      top.append(meta);
+    }
+    if (intro && intro.tagName === "P") {
+      intro.className = "intro";
+      top.append(intro);
+    }
+  }
+  if (summary) {
+    const box = el("div", "summary");
+    const total = summary.classes.layers.reduce((sum, [, count]) => sum + count, 0);
+    const classes = stat(summary.classes.label, total, summary.classes.section);
+    if (total) {
+      const bar = el("span", "bar");
+      bar.setAttribute("role", "img");
+      bar.setAttribute("aria-label", summary.classes.layers.map(([layer, count]) => layer + " " + count).join(", "));
+      const legend = el("span", "legend");
+      for (const [layer, count] of summary.classes.layers) {
+        const color = data.layers[layer].stroke;
+        const part = el("i");
+        part.style.cssText = "--c:" + color + ";flex-grow:" + count;
+        bar.append(part);
+        const key = el("span", "", layer + " ");
+        key.style.setProperty("--c", color);
+        key.append(el("b", "", String(count)));
+        legend.append(key);
+      }
+      classes.append(bar, legend);
+    }
+    box.append(classes);
+    for (const fact of summary.facts) {
+      const cell = stat(fact.label, fact.count, fact.section);
+      if (fact.alert && fact.count) cell.dataset.alert = fact.alert;
+      box.append(cell);
+    }
+    top.append(box);
+  }
+  doc.prepend(top);
+}
+
+function stat(label, value, section) {
+  const heading = headingFor(section);
+  const cell = el(heading ? "button" : "div", "stat");
+  if (heading) {
+    cell.type = "button";
+    cell.addEventListener("click", () => jump(heading));
+  }
+  cell.append(el("span", "stat-label", label), el("span", "stat-value", String(value)));
+  return cell;
+}
+
+function tables() {
+  for (const table of doc.querySelectorAll("table")) {
+    const frame = el("div", "table");
+    table.replaceWith(frame);
+    frame.append(table);
+    for (const cell of table.querySelectorAll("td")) {
+      const name = cell.textContent.trim();
+      if (!Object.hasOwn(data.layers, name)) continue;
+      const layer = data.layers[name];
+      const chip = el("span", "layer", name);
+      chip.style.cssText = "--fill:" + layer.fill + ";--c:" + layer.stroke;
+      cell.replaceChildren(chip);
+    }
+  }
+}
+
+function contents() {
+  toc.replaceChildren();
+  heads.forEach((heading, i) => {
+    heading.id = "section-" + (i + 1);
+    heading.tabIndex = -1;
+    const button = el("button", "", heading.textContent);
+    button.type = "button";
+    button.addEventListener("click", () => jump(heading));
+    const item = el("li");
+    item.append(button);
+    toc.append(item);
+  });
+  document.getElementById("toc-title").hidden = !heads.length;
+  spy();
+}
+
+// The section being read is the last heading above the upper third of the window.
+let current = null;
+function spy() {
+  let index = 0;
+  heads.forEach((heading, i) => { if (heading.getBoundingClientRect().top < innerHeight * 0.3) index = i; });
+  if (heads.length && innerHeight + scrollY >= document.documentElement.scrollHeight - 2) index = heads.length - 1;
+  const button = toc.querySelectorAll("button")[index];
+  if (!button || button === current) return;
+  if (current) current.removeAttribute("aria-current");
+  button.setAttribute("aria-current", "true");
+  current = button;
+  // On a phone the sections are a row that scrolls sideways: keep the current one in sight. Without animation,
+  // because a smooth scroll here would stop the page's own smooth scroll to a section.
+  const bar = button.closest("aside");
+  const rect = button.getBoundingClientRect(), edges = bar.getBoundingClientRect();
+  if (bar.scrollWidth > bar.clientWidth && (rect.left < edges.left || rect.right > edges.right)) {
+    bar.scrollLeft += rect.left - edges.left - (edges.width - rect.width) / 2;
+  }
+}
+
+// A diagram drawn at its own size inside a frame: dragged to move, zoomed with the buttons, Ctrl + wheel,
+// a double click or the keyboard, and expanded to the whole window.
+function viewer(pre) {
+  const svg = pre.querySelector("svg");
+  if (!svg) return null;
+  const box = svg.viewBox.baseVal;
+  const size = box && box.width ? { w: box.width, h: box.height } : svg.getBBox();
+  const w = size.w || size.width, h = size.h || size.height;
+  svg.setAttribute("width", w);
+  svg.setAttribute("height", h);
+  svg.style.maxWidth = "none";
+
+  const frame = el("figure", "diagram");
+  const stage = el("div", "stage");
+  const canvas = el("div", "canvas");
+  const tools = el("div", "tools");
+  const zoomOut = iconButton("out", labels.zoom_out);
+  const zoomIn = iconButton("in", labels.zoom_in);
+  const fitButton = iconButton("fit", labels.fit);
+  const expandButton = iconButton("expand", labels.expand);
+  const level = el("output");
+  tools.append(zoomOut, level, zoomIn, el("span", "rule"), fitButton, expandButton);
+  stage.tabIndex = 0;
+  stage.setAttribute("role", "group");
+  stage.setAttribute("aria-label", labels.diagram);
+  canvas.append(svg);
+  stage.append(canvas);
+  frame.append(stage, tools);
+  pre.replaceWith(frame);
+
+  const view = { s: 1, x: 0, y: 0 };
+  const PAD = 24, TOP = 54, MIN_READABLE = 0.6;
+  const apply = (ease) => {
+    canvas.classList.toggle("ease", Boolean(ease));
+    canvas.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.s + ")";
+    level.value = Math.round(view.s * 100) + "%";
+  };
+  // Fitted to the frame, but in the page never below a readable size: a wider diagram starts at its left
+  // edge and is moved to see the rest, or expanded.
+  const fit = (ease) => {
+    const big = frame.classList.contains("expanded");
+    const room = big ? stage.clientHeight - TOP - PAD : Math.max(260, innerHeight * 0.85) - TOP - PAD;
+    const whole = Math.min(big ? 2 : 1, (stage.clientWidth - 2 * PAD) / w, room / h);
+    view.s = big ? whole : Math.max(whole, MIN_READABLE);
+    if (!big) stage.style.height = Math.ceil(Math.min(h * view.s, room) + TOP + PAD) + "px";
+    view.x = Math.max(PAD, (stage.clientWidth - w * view.s) / 2);
+    view.y = TOP + (big ? Math.max(0, (room - h * view.s) / 2) : 0);
+    apply(ease);
+  };
+  const zoom = (factor, cx, cy, ease) => {
+    const s = Math.min(4, Math.max(0.1, view.s * factor));
+    if (cx === undefined) { cx = stage.clientWidth / 2; cy = stage.clientHeight / 2; }
+    view.x = cx - (cx - view.x) * (s / view.s);
+    view.y = cy - (cy - view.y) * (s / view.s);
+    view.s = s;
+    apply(ease);
+  };
+  const point = (event) => {
+    const rect = stage.getBoundingClientRect();
+    return [event.clientX - rect.left, event.clientY - rect.top];
+  };
+  const expand = (on) => {
+    if (on && expanded) expanded.expand(false);
+    frame.classList.toggle("expanded", on);
+    scrim.hidden = !on;
+    document.body.classList.toggle("locked", on);
+    const name = on ? "collapse" : "expand";
+    const label = on ? labels.collapse : labels.expand;
+    expandButton.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">' + ICONS[name] + "</svg>";
+    expandButton.setAttribute("aria-label", label);
+    expandButton.title = label;
+    expanded = on ? handle : null;
+    if (on) stage.style.height = "";
+    fit(false);
+    (on ? stage : expandButton).focus({ preventScroll: true });
+  };
+
+  zoomOut.addEventListener("click", () => zoom(1 / 1.25, undefined, undefined, true));
+  zoomIn.addEventListener("click", () => zoom(1.25, undefined, undefined, true));
+  fitButton.addEventListener("click", () => fit(true));
+  expandButton.addEventListener("click", () => expand(!frame.classList.contains("expanded")));
+  stage.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    zoom(Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0025)), ...point(event), false);
+  }, { passive: false });
+  stage.addEventListener("dblclick", (event) => zoom(1.6, ...point(event), true));
+  stage.addEventListener("keydown", (event) => {
+    const moves = { ArrowLeft: [40, 0], ArrowRight: [-40, 0], ArrowUp: [0, 40], ArrowDown: [0, -40] };
+    if (event.key === "+" || event.key === "=") zoom(1.25, undefined, undefined, true);
+    else if (event.key === "-") zoom(1 / 1.25, undefined, undefined, true);
+    else if (event.key === "0") fit(true);
+    else if (moves[event.key]) { view.x += moves[event.key][0]; view.y += moves[event.key][1]; apply(true); }
+    else return;
+    event.preventDefault();
+  });
+
+  // Dragging starts after a few pixels, so a click on a module of the index still opens it.
+  let drag = null, moved = false;
+  stage.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    drag = { x: event.clientX - view.x, y: event.clientY - view.y, startX: event.clientX, startY: event.clientY };
+    moved = false;
+  });
+  stage.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    if (!moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
+    if (!moved) {
+      moved = true;
+      stage.setPointerCapture(event.pointerId);
+      stage.classList.add("dragging");
+    }
+    view.x = event.clientX - drag.x;
+    view.y = event.clientY - drag.y;
+    apply(false);
+  });
+  const stop = () => { drag = null; stage.classList.remove("dragging"); };
+  stage.addEventListener("pointerup", stop);
+  stage.addEventListener("pointercancel", stop);
+  stage.addEventListener("click", (event) => {
+    if (moved) { event.preventDefault(); event.stopPropagation(); moved = false; }
+  }, true);
+
+  const handle = { fit, expand };
+  fit(false);
+  return handle;
+}
+
+scrim.addEventListener("click", () => expanded && expanded.expand(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && expanded) expanded.expand(false);
+});
+let width = innerWidth;
+addEventListener("resize", () => {
+  if (expanded) expanded.fit(false);
+  if (innerWidth === width) return;
+  width = innerWidth;
+  viewers.forEach((viewer) => viewer !== expanded && viewer.fit(false));
+});
+addEventListener("scroll", () => requestAnimationFrame(spy), { passive: true });
 
 async function show() {
   const turn = ++shown;
   const anchor = decodeURIComponent(location.hash.slice(1));
-  const page = data.modules[anchor];
-  document.getElementById("nav").hidden = !page;
+  const page = Object.hasOwn(data.modules, anchor) ? data.modules[anchor] : null;
   document.title = page ? page.path + " · " + data.title : data.title;
-  if (page) {
-    document.getElementById("module").textContent = page.path;
-    document.getElementById("file").href = page.file;
-  }
+  document.getElementById("back").hidden = !page;
+  const file = page ? page.file : data.file;
+  const link = document.getElementById("file");
+  link.hidden = !file;
+  if (file) link.href = file;
   const text = page ? page.markdown : data.home;
   try {
     libs = libs || await load();
   } catch (error) {
-    main.innerHTML = '<p class="notice">' + escape(data.offline) + "</p><pre>" + escape(text) + "</pre>";
+    doc.innerHTML = '<p class="notice">' + escape(data.offline) + "</p><pre>" + escape(text) + "</pre>";
     return;
   }
   if (turn !== shown) return;
-  main.innerHTML = libs.marked.parse(text);
-  for (const code of main.querySelectorAll("code.language-mermaid")) {
-    const diagram = document.createElement("pre");
-    diagram.className = "mermaid";
-    diagram.textContent = code.textContent;
+  if (expanded) expanded.expand(false);
+  doc.innerHTML = libs.marked.parse(text);
+  heads = [...doc.querySelectorAll("h2")];
+  current = null;
+  header(page ? page.summary : data.summary);
+  tables();
+  const diagrams = [];
+  for (const code of doc.querySelectorAll("code.language-mermaid")) {
+    const diagram = el("pre", "mermaid", code.textContent);
     code.parentElement.replaceWith(diagram);
+    diagrams.push(diagram);
   }
+  contents();
   window.scrollTo(0, 0);
-  await libs.mermaid.run({ nodes: main.querySelectorAll("pre.mermaid") });
+  await libs.mermaid.run({ nodes: diagrams, suppressErrors: true });
+  if (turn !== shown) return;
+  viewers = diagrams.map(viewer).filter(Boolean);
+  spy();
 }
 
 window.addEventListener("hashchange", show);

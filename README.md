@@ -137,12 +137,14 @@ Output is in English by default. Add `--lang es` to both commands (or set `MODUL
 
 ```
 generated: feature/login/docs/architecture/feature-login.md
+generated: feature/login/docs/architecture/feature-login.html
 ```
 
 ```
 feature/login/docs/architecture/
 ├── feature-login.module-map.json   ← structured map (nodes + edges)
 ├── feature-login.md                ← full document with all diagrams
+├── feature-login.html              ← the same document as a page, diagrams drawn
 └── feature-login.classes.md        ← only when --only is used
 ```
 
@@ -314,7 +316,15 @@ module-diagrams feature/login
 
 ```
 generated: feature/login/docs/architecture/feature-login.md
+generated: feature/login/docs/architecture/feature-login.html
 ```
+
+`feature-login.html` is the same document as a page, with the diagrams drawn. A summary at the top
+counts the classes per layer, the layer violations, the edges to review and the external types; a
+sidebar jumps between sections; each diagram can be dragged, zoomed (buttons, Ctrl + wheel, `+`/`-`)
+and expanded to the whole window. Open it in any browser. Like `index.html`, it loads marked and Mermaid from cdn.jsdelivr.net, so it needs a
+connection. When several modules are documented together, their pages live inside `index.html`
+instead.
 
 </details>
 
@@ -365,6 +375,7 @@ module-diagrams . --module login --only layers,violations
 
 ```
 generated: feature/login/docs/architecture/feature-login.layers-violations.md
+generated: feature/login/docs/architecture/feature-login.layers-violations.html
 ```
 
 </details>
