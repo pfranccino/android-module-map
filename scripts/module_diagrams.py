@@ -13,7 +13,8 @@ Usage: python module_diagrams.py <module_directory> [--only classes] [--flow Cla
        python module_diagrams.py <map.json | directory_of_maps> [-o output] [--lang es]
 
 Given a module (or a directory of modules) it reads the maps that module_map.py left in each
-<module>/docs/architecture/ and writes every document next to its map. With several modules it
+<module>/docs/architecture/ and writes every document next to its map. With a single module it also
+writes <module>.html, the same document as a page with the diagrams drawn. With several modules it
 also writes an index.md with the graph of Gradle dependencies between them, and an index.html where a click on a
 module in that graph shows the module's document. --module restricts it to one module. With --only the result
 goes to <module>.<sections>.md, so the full document is never overwritten, and modules that have
@@ -171,10 +172,21 @@ MESSAGES = {
                        "documento de cada módulo con un clic en el grafo.",
         "index_columns": "Módulo|Tipo|Nodos|Depende de (en este grupo)|Otros módulos",
         "index_links_viewer": "Un clic en un módulo, en el grafo o en la tabla, abre su documento.",
-        "html_back": "← Todos los módulos",
+        "html_back": "Todos los módulos",
         "html_document": "Abrir el .md",
         "html_offline": "No se pudieron cargar marked y Mermaid desde cdn.jsdelivr.net, así que se muestra el "
                         "texto sin dibujar. Hace falta conexión para ver los diagramas.",
+        "html_contents": "En esta página",
+        "html_classes": "Clases",
+        "html_violations": "Violaciones de capas",
+        "html_review": "Aristas a revisar",
+        "html_external": "Tipos externos usados",
+        "html_zoom_in": "Acercar",
+        "html_zoom_out": "Alejar",
+        "html_fit": "Ajustar a la vista",
+        "html_expand": "Ampliar",
+        "html_collapse": "Cerrar la vista ampliada",
+        "html_diagram": "Diagrama. Arrastra para moverlo; Ctrl + rueda, o las teclas + y -, para el zoom.",
         "section_layers": "diagrama de arquitectura por capas",
         "section_flows": "diagrama de flujos desde los ViewModels",
         "section_sequence": "diagrama de secuencia de un flujo",
@@ -312,10 +324,21 @@ MESSAGES = {
                        "module's document with a click on the graph.",
         "index_columns": "Module|Type|Nodes|Depends on (in this group)|Other modules",
         "index_links_viewer": "A click on a module, in the graph or in the table, opens its document.",
-        "html_back": "← All modules",
+        "html_back": "All modules",
         "html_document": "Open the .md",
         "html_offline": "marked and Mermaid could not be loaded from cdn.jsdelivr.net, so the text is shown "
                         "without drawing it. A connection is needed to see the diagrams.",
+        "html_contents": "On this page",
+        "html_classes": "Classes",
+        "html_violations": "Layer violations",
+        "html_review": "Edges to review",
+        "html_external": "External types used",
+        "html_zoom_in": "Zoom in",
+        "html_zoom_out": "Zoom out",
+        "html_fit": "Fit to view",
+        "html_expand": "Expand",
+        "html_collapse": "Close the expanded view",
+        "html_diagram": "Diagram. Drag to move it; Ctrl + wheel, or the + and - keys, to zoom.",
         "section_layers": "layered architecture diagram",
         "section_flows": "diagram of the flows from the ViewModels",
         "section_sequence": "sequence diagram of one flow",
@@ -881,13 +904,17 @@ def hilt_diagram(m):
 
 # ---------- analysis ----------
 
-def class_table(m):
-    """Every type of the module (nested ones included) and its composables, with layer, role and KDoc."""
+def listed_classes(m):
+    """Every type of the module (nested ones included) and its composables, by layer and position."""
     listed = [i for i, n in m.nodes.items()
               if n["kind"] in ("class", "interface", "object", "enum", "annotation") or n.get("role") == "composable"]
-    listed.sort(key=lambda i: (LAYERS.index(m.layers[i]), m.nodes[i]["file"], m.nodes[i].get("lines", [0])[0]))
+    return sorted(listed, key=lambda i: (LAYERS.index(m.layers[i]), m.nodes[i]["file"], m.nodes[i].get("lines", [0])[0]))
+
+
+def class_table(m):
+    """Every type of the module (nested ones included) and its composables, with layer, role and KDoc."""
     rows = []
-    for node_id in listed:
+    for node_id in listed_classes(m):
         node = m.nodes[node_id]
         kind = " ".join([mod for mod in ("sealed", "abstract", "data", "value") if mod in node.get("modifiers", [])]
                         + [node["kind"]])
@@ -904,7 +931,7 @@ def confidence_note(m, edge):
     return m.t("confidence_unverified", value=min(values)) if values and min(values) < 0.9 else ""
 
 
-def layer_violations(m):
+def violation_rows(m):
     rows = []
     for e in m.edges:
         if e["from"] in m.nodes and e["to"] in m.nodes:
@@ -912,6 +939,11 @@ def layer_violations(m):
             if pair in m.rules.forbidden:
                 rows.append((f"{m.label(e['from'])} → {m.label(e['to'])}", " → ".join(pair), e["kind"],
                              m.where(e), confidence_note(m, e) or "-"))
+    return rows
+
+
+def layer_violations(m):
+    rows = violation_rows(m)
     if rows:
         return table(columns(m, "violations_columns"), sorted(rows))
     if not m.rules.forbidden:
@@ -955,7 +987,7 @@ def external_dependencies(m):
     return "\n\n".join(parts)
 
 
-def edges_to_verify(m):
+def review_items(m):
     items = []
     for e in m.edges:
         arrow = f"{m.label(e['from'])} → {m.label(e['to'])}"
@@ -979,7 +1011,11 @@ def edges_to_verify(m):
     codegraph = m.data.get("sources", {}).get("codegraph", {}).get("status")
     if codegraph != "ok":
         items.append(m.t("review_no_codegraph", status=codegraph))
-    return "\n".join(f"- {item}" for item in dict.fromkeys(items))
+    return list(dict.fromkeys(items))
+
+
+def edges_to_verify(m):
+    return "\n".join(f"- {item}" for item in review_items(m))
 
 
 # ---------- document ----------
@@ -1108,85 +1144,551 @@ def build_index(maps, documents, title, lang=DEFAULT_LANG, viewer=False):
     return "\n\n".join(sections) + "\n"
 
 
-# ---------- interactive index ----------
-# One self-contained page: the index graph, where a click on a module shows that module's document in
-# the same page. The Markdown is embedded as is and drawn in the browser with marked and Mermaid.
+# ---------- pages ----------
+# One self-contained page per run: index.html for several modules (the index graph, where a click on a module
+# shows that module's document in the same page) or <module>.html for one. The Markdown is embedded as is and
+# drawn in the browser with marked and Mermaid; the page adds a summary, section navigation and diagrams that
+# can be zoomed, moved and expanded.
 
 MARKED_URL = "https://cdn.jsdelivr.net/npm/marked@15.0.7/lib/marked.esm.js"
 MERMAID_URL = "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs"
-HTML_PAGE = """<!doctype html>
+HTML_PAGE = r"""<!doctype html>
 <html lang="__LANG__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
 <style>
-  :root { color-scheme: light; --text: #0f172a; --muted: #475569; --line: #e2e8f0; --accent: #2563eb; }
-  body { margin: 0; background: #ffffff; color: var(--text);
-         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  nav { position: sticky; top: 0; display: flex; gap: 16px; align-items: center; padding: 10px 16px;
-        background: #f8fafc; border-bottom: 1px solid var(--line); }
-  nav[hidden] { display: none; }
-  nav strong { flex: 1; font-family: ui-monospace, Consolas, monospace; }
-  a { color: var(--accent); }
-  main { max-width: 1100px; margin: 0 auto; padding: 8px 16px 48px; }
-  h1 { font-size: 1.6em; } h2 { margin-top: 2em; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
-  table { border-collapse: collapse; display: block; overflow-x: auto; }
-  th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
-  th { background: #f8fafc; }
-  code { font-family: ui-monospace, Consolas, monospace; font-size: 0.92em; }
-  pre { overflow-x: auto; background: #f8fafc; padding: 12px; border-radius: 6px; }
-  pre.mermaid { background: none; text-align: center; }
-  pre.mermaid svg .clickable { cursor: pointer; }
-  .notice { padding: 10px 12px; background: #fef3c7; border-radius: 6px; }
+  :root {
+    color-scheme: light;
+    --ground: #ffffff; --panel: #f5f6f8; --canvas: #fafbfc; --hover: #eceef2;
+    --ink: #111827; --ink-2: #4b5563; --ink-3: #5f6673;
+    --line: #e4e7eb; --line-2: #d0d5dc; --dot: #dde1e6;
+    --accent: #1f5fd1; --accent-wash: #e8effc;
+    --bad: #b42318; --warn: #a15c07;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+    --side: 252px; --bar: 0px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: calc(var(--bar) + 16px); }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 15px/1.6 var(--sans);
+         -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  body.locked { overflow: hidden; }
+  ::selection { background: #cddcf7; color: var(--ink); }
+  * { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  svg.icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75;
+             stroke-linecap: round; stroke-linejoin: round; }
+
+  .shell { display: grid; grid-template-columns: var(--side) minmax(0, 1fr); min-height: 100vh; }
+  aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column;
+          gap: 22px; padding: 22px 14px 20px; background: var(--panel); border-right: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 0 10px; font-size: 13px; font-weight: 600;
+           color: var(--ink-2); }
+  .brand svg { width: 18px; height: 18px; flex: none; }
+  .back { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin: -10px 0 -6px;
+          border-radius: 6px; font-size: 13.5px; font-weight: 500; text-decoration: none; }
+  .back:hover { background: var(--hover); }
+  .back[hidden], .file[hidden], .toc-title[hidden] { display: none; }
+  .toc-title { margin: 0 0 6px; padding: 0 10px; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+  .toc ol { margin: 0; padding: 0; list-style: none; }
+  .toc button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 5px 10px;
+                border-radius: 6px; font-size: 13.5px; line-height: 1.35; color: var(--ink-2); cursor: pointer; }
+  .toc button:hover { background: var(--hover); color: var(--ink); }
+  .toc button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .toc button[aria-current="true"] { background: var(--ground); color: var(--ink); font-weight: 600;
+                                     box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgba(17, 24, 39, .06); }
+  .file { display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 0 10px; font-size: 13px; }
+
+  main { min-width: 0; padding: 44px 48px 120px; }
+  .doc { max-width: 1080px; margin: 0 auto; overflow-wrap: break-word; }
+  .top h1 { margin: 0; font-size: 28px; line-height: 1.2; font-weight: 650; letter-spacing: -0.018em;
+            text-wrap: balance; overflow-wrap: anywhere; }
+  .meta { display: flex; flex-wrap: wrap; margin-top: 8px; font-size: 13.5px; color: var(--ink-2); }
+  .meta span + span::before { content: "/"; margin: 0 10px; color: var(--line-2); }
+  .top .intro { margin: 10px 0 0; max-width: 75ch; font-size: 13.5px; color: var(--ink-3); }
+
+  .summary { display: grid; grid-template-columns: minmax(0, 1.7fr) repeat(3, minmax(0, 1fr)); margin-top: 26px;
+             border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .stat { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; min-width: 0;
+          padding: 16px 18px 15px; }
+  .stat + .stat { border-left: 1px solid var(--line); }
+  button.stat { cursor: pointer; transition: background-color 150ms ease-out; }
+  button.stat:hover { background: var(--canvas); }
+  button.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .stat-label { font-size: 12.5px; color: var(--ink-2); }
+  .stat-value { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 600; line-height: 1.3;
+                font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .stat[data-alert="bad"] .stat-value { color: var(--bad); }
+  .stat[data-alert="warn"] .stat-value { color: var(--warn); }
+  .stat[data-alert] .stat-value::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .bar { display: flex; gap: 2px; height: 8px; margin: 10px 0 8px; border-radius: 4px; overflow: hidden; }
+  .bar i { background: var(--c); }
+  .legend { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12.5px; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .legend span::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--c); }
+  .legend b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .doc h2 { margin: 60px 0 10px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 19px;
+            line-height: 1.3; font-weight: 650; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+  .doc h2:focus { outline: none; }
+  .doc > h1 { font-size: 28px; line-height: 1.2; letter-spacing: -0.018em; }
+  .doc p, .doc ul { max-width: 75ch; }
+  .doc h2 + p { color: var(--ink-2); font-size: 14px; }
+  .doc p:has(> strong:only-child) { margin: 26px 0 0; font-size: 14px; }
+  .doc strong { font-weight: 600; }
+  .doc ul { padding-left: 20px; }
+  .doc li { margin: 8px 0; }
+  .doc li::marker { color: var(--ink-3); }
+  .doc code { padding: 1px 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel);
+              font: 0.86em/1.5 var(--mono); overflow-wrap: anywhere; }
+  .doc pre { overflow-x: auto; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px;
+             background: var(--canvas); font: 13px/1.55 var(--mono); }
+  .doc pre code { padding: 0; border: 0; background: none; font-size: inherit; }
+
+  .table { margin: 14px 0 22px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  th { padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--panel); text-align: left;
+       font-size: 12.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: var(--canvas); }
+  .layer { display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px 1px 7px; border-radius: 999px;
+           background: var(--fill); font-size: 12.5px; white-space: nowrap; }
+  .layer::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+
+  .diagram { position: relative; margin: 16px 0 26px; overflow: hidden; border: 1px solid var(--line);
+             border-radius: 12px; background: var(--canvas); }
+  .stage { position: relative; height: 320px; overflow: hidden; cursor: grab; touch-action: pan-y;
+           background-image: radial-gradient(circle, var(--dot) 1px, transparent 1.3px); background-size: 18px 18px; }
+  .stage:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 12px; }
+  .stage.dragging { cursor: grabbing; }
+  .canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+  .canvas.ease { transition: transform 220ms cubic-bezier(.16, 1, .3, 1); }
+  .canvas svg { display: block; max-width: none; }
+  .tools { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; align-items: center; gap: 2px;
+           padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground);
+           box-shadow: 0 1px 2px rgba(17, 24, 39, .05), 0 6px 16px -6px rgba(17, 24, 39, .12); }
+  .tools button { all: unset; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px;
+                  color: var(--ink-2); cursor: pointer; }
+  .tools button:hover { background: var(--panel); color: var(--ink); }
+  .tools button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .tools output { min-width: 46px; font-size: 12px; text-align: center; color: var(--ink-2);
+                  font-variant-numeric: tabular-nums; }
+  .tools .rule { width: 1px; height: 16px; margin: 0 3px; background: var(--line); }
+  .diagram.expanded { position: fixed; inset: 20px; z-index: 50; margin: 0;
+                      box-shadow: 0 30px 80px -20px rgba(17, 24, 39, .45); }
+  .diagram.expanded .stage { height: 100%; touch-action: none; }
+  .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(17, 24, 39, .4); }
+  .scrim[hidden] { display: none; }
+  .notice { max-width: 75ch; padding: 12px 14px; border: 1px solid #f3d38a; border-radius: 10px;
+            background: #fffaeb; color: #6b3d05; }
+
+  @media (max-width: 900px) {
+    :root { --bar: 49px; }
+    .shell { display: block; }
+    aside { z-index: 30; height: var(--bar); flex-direction: row; align-items: center; gap: 6px; padding: 0 10px;
+            overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line);
+            scrollbar-width: none; }
+    .brand, .file, .toc-title { display: none; }
+    .back { margin: 0; flex: none; }
+    .toc ol { display: flex; gap: 4px; }
+    .toc button { white-space: nowrap; }
+    main { padding: 26px 16px 80px; }
+    .top h1, .doc > h1 { font-size: 23px; }
+    .summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .summary .stat:first-child { grid-column: 1 / -1; border-bottom: 1px solid var(--line); }
+    .summary .stat:nth-child(2) { border-left: 0; }
+    .stat { padding: 13px 14px; }
+    .stat-value { font-size: 19px; }
+    .doc h2 { margin-top: 44px; }
+    .diagram.expanded { inset: 0; border: 0; border-radius: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .canvas.ease, button.stat { transition: none; }
+  }
 </style>
 </head>
 <body>
-<nav id="nav" hidden><a href="#">__BACK__</a><strong id="module"></strong><a id="file" href="">__DOCUMENT__</a></nav>
-<main id="main"></main>
+<div class="shell">
+  <aside>
+    <div class="brand">
+      <svg viewBox="0 0 18 18" aria-hidden="true"><rect x="1" y="2" width="16" height="3.5" rx="1.2" fill="#2563eb"/><rect x="1" y="7.25" width="16" height="3.5" rx="1.2" fill="#16a34a"/><rect x="1" y="12.5" width="16" height="3.5" rx="1.2" fill="#d97706"/></svg>
+      <span>android-module-map</span>
+    </div>
+    <a class="back" id="back" href="#" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>__BACK__</a>
+    <nav class="toc" aria-labelledby="toc-title">
+      <p class="toc-title" id="toc-title" hidden>__CONTENTS__</p>
+      <ol id="toc"></ol>
+    </nav>
+    <a class="file" id="file" href="" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>__DOCUMENT__</a>
+  </aside>
+  <main><article class="doc" id="doc"></article></main>
+</div>
+<div class="scrim" id="scrim" hidden></div>
 <script type="application/json" id="data">__DATA__</script>
 <script type="module">
 const data = JSON.parse(document.getElementById("data").textContent);
-const main = document.getElementById("main");
+const labels = data.labels;
+const doc = document.getElementById("doc");
+const toc = document.getElementById("toc");
+const scrim = document.getElementById("scrim");
+const still = matchMedia("(prefers-reduced-motion: reduce)");
 const escape = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const ICONS = {
+  out: '<path d="M5 12h14"/>',
+  in: '<path d="M12 5v14M5 12h14"/>',
+  fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  expand: '<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>',
+  collapse: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
+};
 let libs = null;
 let shown = 0;
+let heads = [];
+let viewers = [];
+let expanded = null;
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function iconButton(name, label) {
+  const button = el("button");
+  button.type = "button";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">' + ICONS[name] + "</svg>";
+  return button;
+}
 
 async function load() {
   const [{ marked }, { default: mermaid }] = await Promise.all([import("__MARKED__"), import("__MERMAID__")]);
   // Text taken from the code (KDoc, signatures) is shown as text, never as HTML.
   marked.use({ renderer: { html: (token) => escape(token.text) } });
-  mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+  const font = getComputedStyle(document.body).fontFamily;
+  mermaid.initialize({
+    startOnLoad: false, securityLevel: "strict", theme: "base", fontFamily: font,
+    themeVariables: {
+      fontFamily: font, fontSize: "14px", background: "#fafbfc", textColor: "#111827",
+      primaryColor: "#ffffff", primaryBorderColor: "#9aa3af", primaryTextColor: "#111827",
+      secondaryColor: "#f5f6f8", tertiaryColor: "#ffffff", lineColor: "#6b7280",
+      clusterBkg: "#ffffff", clusterBorder: "#d0d5dc", titleColor: "#4b5563", edgeLabelBackground: "#fafbfc",
+      actorBkg: "#ffffff", actorBorder: "#9aa3af", actorTextColor: "#111827", actorLineColor: "#d0d5dc",
+      signalColor: "#4b5563", signalTextColor: "#111827", labelBoxBkgColor: "#ffffff",
+      labelBoxBorderColor: "#d0d5dc", labelTextColor: "#111827", loopTextColor: "#4b5563",
+      noteBkgColor: "#fffaeb", noteBorderColor: "#f3d38a", noteTextColor: "#111827",
+      activationBkgColor: "#e8effc", activationBorderColor: "#1f5fd1",
+    },
+    flowchart: { curve: "basis", padding: 14 },
+    sequence: { mirrorActors: false, actorMargin: 40 },
+  });
   return { marked, mermaid };
 }
+
+function jump(heading) {
+  heading.scrollIntoView({ behavior: still.matches ? "auto" : "smooth", block: "start" });
+  heading.focus({ preventScroll: true });
+}
+
+function headingFor(text) {
+  return heads.find((heading) => heading.textContent === text);
+}
+
+// The module's title, what it is, and the counts worth a look, each one a way into its section.
+function header(summary) {
+  const top = el("header", "top");
+  const title = doc.firstElementChild;
+  if (title && title.tagName === "H1") {
+    const intro = title.nextElementSibling;
+    top.append(title);
+    if (summary && summary.meta.length) {
+      const meta = el("div", "meta");
+      meta.append(...summary.meta.map((value) => el("span", "", value)));
+      top.append(meta);
+    }
+    if (intro && intro.tagName === "P") {
+      intro.className = "intro";
+      top.append(intro);
+    }
+  }
+  if (summary) {
+    const box = el("div", "summary");
+    const total = summary.classes.layers.reduce((sum, [, count]) => sum + count, 0);
+    const classes = stat(summary.classes.label, total, summary.classes.section);
+    if (total) {
+      const bar = el("span", "bar");
+      bar.setAttribute("role", "img");
+      bar.setAttribute("aria-label", summary.classes.layers.map(([layer, count]) => layer + " " + count).join(", "));
+      const legend = el("span", "legend");
+      for (const [layer, count] of summary.classes.layers) {
+        const color = data.layers[layer].stroke;
+        const part = el("i");
+        part.style.cssText = "--c:" + color + ";flex-grow:" + count;
+        bar.append(part);
+        const key = el("span", "", layer + " ");
+        key.style.setProperty("--c", color);
+        key.append(el("b", "", String(count)));
+        legend.append(key);
+      }
+      classes.append(bar, legend);
+    }
+    box.append(classes);
+    for (const fact of summary.facts) {
+      const cell = stat(fact.label, fact.count, fact.section);
+      if (fact.alert && fact.count) cell.dataset.alert = fact.alert;
+      box.append(cell);
+    }
+    top.append(box);
+  }
+  doc.prepend(top);
+}
+
+function stat(label, value, section) {
+  const heading = headingFor(section);
+  const cell = el(heading ? "button" : "div", "stat");
+  if (heading) {
+    cell.type = "button";
+    cell.addEventListener("click", () => jump(heading));
+  }
+  cell.append(el("span", "stat-label", label), el("span", "stat-value", String(value)));
+  return cell;
+}
+
+function tables() {
+  for (const table of doc.querySelectorAll("table")) {
+    const frame = el("div", "table");
+    table.replaceWith(frame);
+    frame.append(table);
+    for (const cell of table.querySelectorAll("td")) {
+      const name = cell.textContent.trim();
+      if (!Object.hasOwn(data.layers, name)) continue;
+      const layer = data.layers[name];
+      const chip = el("span", "layer", name);
+      chip.style.cssText = "--fill:" + layer.fill + ";--c:" + layer.stroke;
+      cell.replaceChildren(chip);
+    }
+  }
+}
+
+function contents() {
+  toc.replaceChildren();
+  heads.forEach((heading, i) => {
+    heading.id = "section-" + (i + 1);
+    heading.tabIndex = -1;
+    const button = el("button", "", heading.textContent);
+    button.type = "button";
+    button.addEventListener("click", () => jump(heading));
+    const item = el("li");
+    item.append(button);
+    toc.append(item);
+  });
+  document.getElementById("toc-title").hidden = !heads.length;
+  spy();
+}
+
+// The section being read is the last heading above the upper third of the window.
+let current = null;
+function spy() {
+  let index = 0;
+  heads.forEach((heading, i) => { if (heading.getBoundingClientRect().top < innerHeight * 0.3) index = i; });
+  if (heads.length && innerHeight + scrollY >= document.documentElement.scrollHeight - 2) index = heads.length - 1;
+  const button = toc.querySelectorAll("button")[index];
+  if (!button || button === current) return;
+  if (current) current.removeAttribute("aria-current");
+  button.setAttribute("aria-current", "true");
+  current = button;
+  // On a phone the sections are a row that scrolls sideways: keep the current one in sight. Without animation,
+  // because a smooth scroll here would stop the page's own smooth scroll to a section.
+  const bar = button.closest("aside");
+  const rect = button.getBoundingClientRect(), edges = bar.getBoundingClientRect();
+  if (bar.scrollWidth > bar.clientWidth && (rect.left < edges.left || rect.right > edges.right)) {
+    bar.scrollLeft += rect.left - edges.left - (edges.width - rect.width) / 2;
+  }
+}
+
+// A diagram drawn at its own size inside a frame: dragged to move, zoomed with the buttons, Ctrl + wheel,
+// a double click or the keyboard, and expanded to the whole window.
+function viewer(pre) {
+  const svg = pre.querySelector("svg");
+  if (!svg) return null;
+  const box = svg.viewBox.baseVal;
+  const size = box && box.width ? { w: box.width, h: box.height } : svg.getBBox();
+  const w = size.w || size.width, h = size.h || size.height;
+  svg.setAttribute("width", w);
+  svg.setAttribute("height", h);
+  svg.style.maxWidth = "none";
+
+  const frame = el("figure", "diagram");
+  const stage = el("div", "stage");
+  const canvas = el("div", "canvas");
+  const tools = el("div", "tools");
+  const zoomOut = iconButton("out", labels.zoom_out);
+  const zoomIn = iconButton("in", labels.zoom_in);
+  const fitButton = iconButton("fit", labels.fit);
+  const expandButton = iconButton("expand", labels.expand);
+  const level = el("output");
+  tools.append(zoomOut, level, zoomIn, el("span", "rule"), fitButton, expandButton);
+  stage.tabIndex = 0;
+  stage.setAttribute("role", "group");
+  stage.setAttribute("aria-label", labels.diagram);
+  canvas.append(svg);
+  stage.append(canvas);
+  frame.append(stage, tools);
+  pre.replaceWith(frame);
+
+  const view = { s: 1, x: 0, y: 0 };
+  const PAD = 24, TOP = 54, MIN_READABLE = 0.6;
+  const apply = (ease) => {
+    canvas.classList.toggle("ease", Boolean(ease));
+    canvas.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.s + ")";
+    level.value = Math.round(view.s * 100) + "%";
+  };
+  // Fitted to the frame, but in the page never below a readable size: a wider diagram starts at its left
+  // edge and is moved to see the rest, or expanded.
+  const fit = (ease) => {
+    const big = frame.classList.contains("expanded");
+    const room = big ? stage.clientHeight - TOP - PAD : Math.max(260, innerHeight * 0.85) - TOP - PAD;
+    const whole = Math.min(big ? 2 : 1, (stage.clientWidth - 2 * PAD) / w, room / h);
+    view.s = big ? whole : Math.max(whole, MIN_READABLE);
+    if (!big) stage.style.height = Math.ceil(Math.min(h * view.s, room) + TOP + PAD) + "px";
+    view.x = Math.max(PAD, (stage.clientWidth - w * view.s) / 2);
+    view.y = TOP + (big ? Math.max(0, (room - h * view.s) / 2) : 0);
+    apply(ease);
+  };
+  const zoom = (factor, cx, cy, ease) => {
+    const s = Math.min(4, Math.max(0.1, view.s * factor));
+    if (cx === undefined) { cx = stage.clientWidth / 2; cy = stage.clientHeight / 2; }
+    view.x = cx - (cx - view.x) * (s / view.s);
+    view.y = cy - (cy - view.y) * (s / view.s);
+    view.s = s;
+    apply(ease);
+  };
+  const point = (event) => {
+    const rect = stage.getBoundingClientRect();
+    return [event.clientX - rect.left, event.clientY - rect.top];
+  };
+  const expand = (on) => {
+    if (on && expanded) expanded.expand(false);
+    frame.classList.toggle("expanded", on);
+    scrim.hidden = !on;
+    document.body.classList.toggle("locked", on);
+    const name = on ? "collapse" : "expand";
+    const label = on ? labels.collapse : labels.expand;
+    expandButton.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">' + ICONS[name] + "</svg>";
+    expandButton.setAttribute("aria-label", label);
+    expandButton.title = label;
+    expanded = on ? handle : null;
+    if (on) stage.style.height = "";
+    fit(false);
+    (on ? stage : expandButton).focus({ preventScroll: true });
+  };
+
+  zoomOut.addEventListener("click", () => zoom(1 / 1.25, undefined, undefined, true));
+  zoomIn.addEventListener("click", () => zoom(1.25, undefined, undefined, true));
+  fitButton.addEventListener("click", () => fit(true));
+  expandButton.addEventListener("click", () => expand(!frame.classList.contains("expanded")));
+  stage.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    zoom(Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0025)), ...point(event), false);
+  }, { passive: false });
+  stage.addEventListener("dblclick", (event) => zoom(1.6, ...point(event), true));
+  stage.addEventListener("keydown", (event) => {
+    const moves = { ArrowLeft: [40, 0], ArrowRight: [-40, 0], ArrowUp: [0, 40], ArrowDown: [0, -40] };
+    if (event.key === "+" || event.key === "=") zoom(1.25, undefined, undefined, true);
+    else if (event.key === "-") zoom(1 / 1.25, undefined, undefined, true);
+    else if (event.key === "0") fit(true);
+    else if (moves[event.key]) { view.x += moves[event.key][0]; view.y += moves[event.key][1]; apply(true); }
+    else return;
+    event.preventDefault();
+  });
+
+  // Dragging starts after a few pixels, so a click on a module of the index still opens it.
+  let drag = null, moved = false;
+  stage.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    drag = { x: event.clientX - view.x, y: event.clientY - view.y, startX: event.clientX, startY: event.clientY };
+    moved = false;
+  });
+  stage.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    if (!moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
+    if (!moved) {
+      moved = true;
+      stage.setPointerCapture(event.pointerId);
+      stage.classList.add("dragging");
+    }
+    view.x = event.clientX - drag.x;
+    view.y = event.clientY - drag.y;
+    apply(false);
+  });
+  const stop = () => { drag = null; stage.classList.remove("dragging"); };
+  stage.addEventListener("pointerup", stop);
+  stage.addEventListener("pointercancel", stop);
+  stage.addEventListener("click", (event) => {
+    if (moved) { event.preventDefault(); event.stopPropagation(); moved = false; }
+  }, true);
+
+  const handle = { fit, expand };
+  fit(false);
+  return handle;
+}
+
+scrim.addEventListener("click", () => expanded && expanded.expand(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && expanded) expanded.expand(false);
+});
+let width = innerWidth;
+addEventListener("resize", () => {
+  if (expanded) expanded.fit(false);
+  if (innerWidth === width) return;
+  width = innerWidth;
+  viewers.forEach((viewer) => viewer !== expanded && viewer.fit(false));
+});
+addEventListener("scroll", () => requestAnimationFrame(spy), { passive: true });
 
 async function show() {
   const turn = ++shown;
   const anchor = decodeURIComponent(location.hash.slice(1));
-  const page = data.modules[anchor];
-  document.getElementById("nav").hidden = !page;
+  const page = Object.hasOwn(data.modules, anchor) ? data.modules[anchor] : null;
   document.title = page ? page.path + " · " + data.title : data.title;
-  if (page) {
-    document.getElementById("module").textContent = page.path;
-    document.getElementById("file").href = page.file;
-  }
+  document.getElementById("back").hidden = !page;
+  const file = page ? page.file : data.file;
+  const link = document.getElementById("file");
+  link.hidden = !file;
+  if (file) link.href = file;
   const text = page ? page.markdown : data.home;
   try {
     libs = libs || await load();
   } catch (error) {
-    main.innerHTML = '<p class="notice">' + escape(data.offline) + "</p><pre>" + escape(text) + "</pre>";
+    doc.innerHTML = '<p class="notice">' + escape(data.offline) + "</p><pre>" + escape(text) + "</pre>";
     return;
   }
   if (turn !== shown) return;
-  main.innerHTML = libs.marked.parse(text);
-  for (const code of main.querySelectorAll("code.language-mermaid")) {
-    const diagram = document.createElement("pre");
-    diagram.className = "mermaid";
-    diagram.textContent = code.textContent;
+  if (expanded) expanded.expand(false);
+  doc.innerHTML = libs.marked.parse(text);
+  heads = [...doc.querySelectorAll("h2")];
+  current = null;
+  header(page ? page.summary : data.summary);
+  tables();
+  const diagrams = [];
+  for (const code of doc.querySelectorAll("code.language-mermaid")) {
+    const diagram = el("pre", "mermaid", code.textContent);
     code.parentElement.replaceWith(diagram);
+    diagrams.push(diagram);
   }
+  contents();
   window.scrollTo(0, 0);
-  await libs.mermaid.run({ nodes: main.querySelectorAll("pre.mermaid") });
+  await libs.mermaid.run({ nodes: diagrams, suppressErrors: true });
+  if (turn !== shown) return;
+  viewers = diagrams.map(viewer).filter(Boolean);
+  spy();
 }
 
 window.addEventListener("hashchange", show);
@@ -1202,20 +1704,65 @@ def module_anchor(m):
     return m.path.strip(":").replace(":", "/")
 
 
+def page_summary(m):
+    """Header of a module's page: what the module is, its classes per layer and the counts worth a look. Each
+    one names the heading of its section, so that a click goes there."""
+    counts = Counter(m.layers[i] for i in listed_classes(m))
+    external = {e["to"] for e in m.edges if e["from"] in m.nodes and e["to"] in m.externals}
+    heading = {key: m.t(key + "_heading").lstrip("# ") for key in ("classes", "violations", "review", "external")}
+    return {
+        "meta": [value for value in (m.module.get("type"), m.module.get("namespace")) if value],
+        "classes": {"label": m.t("html_classes"), "section": heading["classes"],
+                    "layers": [[layer, counts[layer]] for layer in LAYERS if counts[layer]]},
+        "facts": [
+            {"label": m.t("html_violations"), "count": len(violation_rows(m)),
+             "section": heading["violations"], "alert": "bad"},
+            {"label": m.t("html_review"), "count": len(review_items(m)),
+             "section": heading["review"], "alert": "warn"},
+            {"label": m.t("html_external"), "count": len(external),
+             "section": heading["external"], "alert": ""},
+        ],
+    }
+
+
+def page_data(lang, **values):
+    """What every page carries besides its documents: the colors of the layers and the labels of its controls."""
+    colors = {layer: dict(part.split(":") for part in style.split(",")) for layer, style in LAYER_STYLES.items()}
+    return {**values,
+            "layers": {layer: {"fill": color["fill"], "stroke": color["stroke"]} for layer, color in colors.items()},
+            "labels": {key: tr(lang, "html_" + key)
+                       for key in ("zoom_in", "zoom_out", "fit", "expand", "collapse", "diagram")},
+            "offline": tr(lang, "html_offline")}
+
+
 def build_html(maps, texts, documents, title, lang=DEFAULT_LANG):
     """index.html: the index, where a click on a module shows its document (texts) in the same page. documents
     are the paths of the .md files relative to the page, for the link to the file."""
     anchors = [module_anchor(m) for m in maps]
-    data = {
-        "title": tr(lang, "index_title", title=title).lstrip("# "),
-        "home": build_index(maps, ["#" + anchor for anchor in anchors], title, lang, viewer=True),
-        "modules": {anchor: {"path": m.path, "file": document, "markdown": text}
-                    for m, anchor, text, document in zip(maps, anchors, texts, documents)},
-        "offline": tr(lang, "html_offline"),
-    }
+    data = page_data(
+        lang,
+        title=tr(lang, "index_title", title=title).lstrip("# "),
+        home=build_index(maps, ["#" + anchor for anchor in anchors], title, lang, viewer=True),
+        file=None,
+        summary=None,
+        modules={anchor: {"path": m.path, "file": document, "markdown": text, "summary": page_summary(m)}
+                 for m, anchor, text, document in zip(maps, anchors, texts, documents)},
+    )
+    return fill_page(data, lang)
+
+
+def build_module_html(m, text, document, lang=DEFAULT_LANG):
+    """<module>.html: the document of a single module (text) as a page, with its diagrams drawn. document is
+    the path of the .md file relative to the page."""
+    data = page_data(lang, title=m.path, home=text, file=document, summary=page_summary(m), modules={})
+    return fill_page(data, lang)
+
+
+def fill_page(data, lang):
     # "<" escaped so that nothing in the Markdown can close the <script> that holds it.
     embedded = json.dumps(data, ensure_ascii=False, indent=1).replace("<", "\\u003c")
     values = {"__LANG__": lang, "__TITLE__": html.escape(data["title"]), "__BACK__": html.escape(tr(lang, "html_back")),
+              "__CONTENTS__": html.escape(tr(lang, "html_contents")),
               "__DOCUMENT__": html.escape(tr(lang, "html_document")), "__MARKED__": MARKED_URL,
               "__MERMAID__": MERMAID_URL, "__DATA__": embedded}
     page = HTML_PAGE
@@ -1320,6 +1867,11 @@ def main():
         document(path).parent.mkdir(parents=True, exist_ok=True)
         document(path).write_text(text, encoding="utf-8")
         written.append(document(path))
+        if len(maps) == 1:
+            # A single module has no index.html to open it from, so its document gets its own page.
+            page = document(path).with_suffix(".html")
+            page.write_text(build_module_html(m, text, document(path).name, lang), encoding="utf-8")
+            written.append(page)
     if everything and not args.only and len(maps) > 1:
         # Maps in one directory: the index goes there. Maps spread over modules: in the directory given.
         together = len({path.parent for path in paths}) == 1

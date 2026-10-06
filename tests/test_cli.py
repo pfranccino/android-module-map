@@ -41,6 +41,13 @@ def test_end_to_end_in_english_by_default(tmp_path):
     assert "codegraph was not used (skipped)" in text
 
 
+def test_single_module_gets_a_page(tmp_path):
+    map_and_document(tmp_path)
+    page = (tmp_path / "doc.html").read_text(encoding="utf-8")
+    assert "<title>:feature:login</title>" in page
+    assert "```mermaid" in page
+
+
 def test_end_to_end_in_spanish(tmp_path):
     data, text = map_and_document(tmp_path, "--lang", "es")
     assert data["legend"]["edge_kinds"]["calls"] == "llamada a función o método"
@@ -128,6 +135,7 @@ def test_examples_directory(tmp_path):
     assert sorted(p.name for p in tmp_path.glob("*.md")) == ["app.md", "core-network.md", "feature-login.md",
                                                             "index.md"]
     assert (tmp_path / "index.html").is_file()
+    assert sorted(p.name for p in tmp_path.glob("*.html")) == ["index.html"]  # modules are inside the index
 
 
 def test_only_one_section(tmp_path):
@@ -135,6 +143,7 @@ def test_only_one_section(tmp_path):
     text = (tmp_path / "feature-login.classes.md").read_text(encoding="utf-8")
     assert "## Classes" in text
     assert "## Layered architecture" not in text
+    assert (tmp_path / "feature-login.classes.html").is_file()
 
 
 def test_sections_are_listed_in_both_languages():

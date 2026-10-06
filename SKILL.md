@@ -54,7 +54,9 @@ user's approval.
 python3 <this-skill-dir>/scripts/module_diagrams.py <directory>
 ```
 
-It finds the maps under that directory and writes each `<module>.md` next to its map. With
+It finds the maps under that directory and writes each `<module>.md` next to its map. With a
+single module it also writes `<module>.html` next to it, the same document as a page with the
+diagrams drawn; point the user to it when they want to see the diagrams in a browser. With
 several modules it also writes `<directory>/docs/architecture/index.md`, which holds only the
 graph of Gradle dependencies between those modules; dependencies on other modules and
 class-level detail stay in each module's document. Next to it goes `index.html`, the same
