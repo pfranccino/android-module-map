@@ -33,3 +33,21 @@ forbidden = [
 # mapper, datasource, di_module, ...
 [layers.by_role]
 # mapper = "Data"
+
+# Read only by module_check.py, the optional layer check.
+[check]
+# Library packages each layer may not use, as layer = [name prefixes]. This table replaces the default one,
+# which forbids Android, serialization, network and Hilt module types in the Domain layer:
+# forbidden_external = { Domain = ["android.", "androidx.", "kotlinx.serialization.", "retrofit2.", "okhttp3.",
+#                                  "io.ktor.", "com.squareup.moshi.", "com.google.gson.", "dagger.Module",
+#                                  "dagger.Provides", "dagger.Binds", "dagger.hilt."] }
+# Annotation names each layer may not use, as layer = [simple names]. This table replaces the default one,
+# which forbids Room, serialization and Hilt annotations in the Domain layer:
+# forbidden_annotations = { Domain = ["Entity", "Dao", "Database", "TypeConverter", "TypeConverters", "Embedded",
+#                                     "Relation", "PrimaryKey", "ColumnInfo", "Serializable", "SerialName",
+#                                     "JsonClass", "SerializedName", "Module", "Provides", "Binds", "InstallIn",
+#                                     "HiltViewModel", "AndroidEntryPoint", "HiltAndroidApp"] }
+# Exit 2 when a class has no layer, so no rule checks it.
+fail_on_unchecked = false
+# Exit 2 when a type looks like the project's but no map or codegraph resolves it.
+fail_on_unresolved = true
