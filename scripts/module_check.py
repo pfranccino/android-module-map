@@ -105,6 +105,7 @@ MESSAGES = {
         "unclassified_targets": "types of other modules with no layer, so no layer rule checks them: {names}",
         "supporting": "the map of {module}, used to classify types here, is not reliable ({state}). Refresh it.",
         "limitation_constructor": "Note: maps do not keep annotations on primary-constructor properties, so those are not checked.",
+        "config_error": "{path}: the configuration cannot be read: {error}",
     },
     "es": {
         "status_pass": "Sin violaciones en {maps} mapas.",
@@ -138,6 +139,7 @@ MESSAGES = {
         "unclassified_targets": "tipos de otros módulos sin capa, así que ninguna regla de capas los revisa: {names}",
         "supporting": "el mapa de {module}, que se usa para clasificar tipos aquí, no es confiable ({state}). Actualízalo.",
         "limitation_constructor": "Nota: los mapas no guardan las anotaciones de las propiedades del constructor primario, así que esas no se revisan.",
+        "config_error": "{path}: no se puede leer la configuración: {error}",
     },
 }
 PARTIAL_PARSE_PREFIXES = tuple(
@@ -221,6 +223,8 @@ def find_violations(m, index, prefixes, options):
             continue
         source_layer = m.layers[source]
         target = edge["to"]
+        # An uncertain edge stays advisory: it never adds coverage requirements that could fail the check.
+        trusted = low_confidence(edge) is None
         record = None
         if target in m.nodes:
             if (source_layer, m.layers[target]) in m.rules.forbidden:
@@ -229,9 +233,10 @@ def find_violations(m, index, prefixes, options):
             external = m.externals[target]
             if target in index:
                 target_module, target_layer = index[target]
-                used.add(target_module)
-                if target_layer == "Other":
-                    other_targets.add(target)
+                if trusted:
+                    used.add(target_module)
+                    if target_layer == "Other":
+                        other_targets.add(target)
                 if (source_layer, target_layer) in m.rules.forbidden:
                     record = {"rule": "layer", "scope": "project", "layers": [source_layer, target_layer],
                               "target_module": target_module}
@@ -244,7 +249,7 @@ def find_violations(m, index, prefixes, options):
                 prefix = next((p for p in options.forbidden_external.get(source_layer, []) if target.startswith(p)), None)
                 if prefix:
                     record = {"rule": "external", "scope": "library", "layer": source_layer, "prefix": prefix}
-                elif target.startswith(prefixes) and not looks_generated(target):
+                elif trusted and target.startswith(prefixes) and not looks_generated(target):
                     unresolved.add(target)
         if record is None:
             continue
@@ -528,8 +533,12 @@ def run(argv):
         print(md.tr(lang, "config_not_found", path=args.config), file=sys.stderr)
         return 2
     start = args.path.resolve()
-    config_path = args.config or md.find_config(start if start.is_dir() else start.parent)
-    config = md.read_config(config_path, lang) if config_path else {}
+    config_path = None
+    try:
+        config_path = args.config or md.find_config(start if start.is_dir() else start.parent)
+        config = md.read_config(config_path, lang) if config_path else {}
+    except OSError as error:
+        return report_error(args.json, t(lang, "config_error", path=config_path or args.path, error=error))
     lang = md.requested_lang(args.lang) or config.get("lang") or md.DEFAULT_LANG
     if lang not in md.LANGS:
         lang = md.DEFAULT_LANG
@@ -571,6 +580,17 @@ def run(argv):
             print(t(lang, "no_maps", path=args.path))
         print_text(results, missing, errors, status, violations, lang)
     return code
+
+
+def report_error(as_json, message):
+    """An error before any map was read: exit 2, as JSON when --json was asked."""
+    if as_json:
+        print(json.dumps({"schema_version": SCHEMA_VERSION, "status": "incomplete", "exit_code": 2, "violations": 0,
+                          "maps": [], "missing_maps": [], "errors": [message], "limitations": []},
+                         indent=2, ensure_ascii=False))
+    else:
+        print(message, file=sys.stderr)
+    return 2
 
 
 def main(argv=None):

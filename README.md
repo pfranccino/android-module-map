@@ -506,18 +506,24 @@ generado: feature/login/docs/architecture/feature-login.md
   network or Hilt module types, which the layer rules alone cannot see.
 - **Forbidden annotations**: an annotation on a class, function or property whose name is listed for
   its layer in `[check].forbidden_annotations` (by default Room, serialization and Hilt annotations in
-  Domain). Maps keep annotations by simple name, so this check matches names.
+  Domain). Maps keep annotations by simple name, so this check matches names, with use-site targets
+  such as `@field:` removed. Annotations on primary-constructor properties are not in the maps, so
+  they are not checked.
 - **Advisory edges**: possible violations backed only by codegraph with a confidence under 0.9. They
-  are listed apart, never fail the check and never decide a class's layer.
+  are listed apart, never fail the check, never decide a class's layer and add no coverage
+  requirement of their own.
 - **Coverage**: maps older than the module's sources, maps whose module folder cannot be found,
-  Kotlin modules without a map, partial parses, types that look like the project's but that no map or
-  codegraph resolves, classes no layer rule classifies, and maps built without codegraph.
+  Kotlin modules without a map (modules with only test sources need none), partial parses, maps of
+  other modules that classify a type here but are stale or partially parsed, types of other modules
+  that no layer rule classifies, types that look like the project's but that no map or codegraph
+  resolves, classes no layer rule classifies, and maps built without codegraph. A file that is not a
+  module map is an error.
 
 | Exit code | Meaning |
 |---|---|
 | 0 | Every map is current and nothing is violated |
 | 1 | There are violations |
-| 2 | The check is incomplete (see Coverage; unclassified classes count only with `fail_on_unchecked`, unresolved project types unless `fail_on_unresolved = false`), or the configuration or a map is invalid |
+| 2 | The check is incomplete (see Coverage; classes and types without a layer count only with `fail_on_unchecked`, unresolved project types unless `fail_on_unresolved = false`), or the configuration or a map cannot be read or is invalid |
 
 Exit 2 wins over 1, because violations read from a stale map may not be the current ones.
 
@@ -758,6 +764,9 @@ the source and describes classes missing KDoc.
 - **Two languages** — English (default) and Spanish
 - **`module-check` sees what the map sees**: the limits above apply to it too: calls only with
   codegraph, no test sources, and types that only Kotlin inference reveals are not checked
+- **One map per module for `module-check`**: when two maps of the same Gradle module are present
+  (a whole-module map and a map of one of its packages, for example), the check may validate the
+  freshness of the wrong one when it classifies a type from that module
 - **`index.html` needs a connection** — it draws the diagrams with marked and Mermaid from a CDN;
   offline it shows the Markdown as plain text
 
