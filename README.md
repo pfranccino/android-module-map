@@ -159,10 +159,15 @@ There are two commands, and you always run them in this order:
 1. **`module-map`** reads the source code and writes a map (`.module-map.json`) per module.
 2. **`module-diagrams`** reads those maps and writes the documents (`.md`, plus an index for several modules).
 
+A third command is optional: **`module-check`** checks the layer rules and exits with a status code, for
+CI, a pre-commit hook or a coding agent. Nothing runs it unless you do, and with `--generate` it writes
+nothing into the project.
+
 The table below gives the command for each task. Click a recipe under it to see what it does and the
 output it prints. All examples run from the root of the Android project. Running from a clone instead
 of installing? Replace `module-map` with `python3 path/to/scripts/module_map.py`, and
-`module-diagrams` with `python3 path/to/scripts/module_diagrams.py`.
+`module-diagrams` with `python3 path/to/scripts/module_diagrams.py`, and `module-check` with
+`python3 path/to/scripts/module_check.py`.
 
 | I want to… | Run |
 |---|---|
@@ -177,6 +182,8 @@ of installing? Replace `module-map` with `python3 path/to/scripts/module_map.py`
 | Draw the sequence of a specific function | `module-diagrams feature/login --flow LoginViewModel.submit` |
 | See which sections exist | `module-diagrams --sections` |
 | Get the documents in Spanish | `module-diagrams feature/login --lang es` |
+| Check the layer rules without writing any document | `module-check . --generate` |
+| Check the maps already written | `module-check .` |
 
 ### `module-map`: read the code, write the map
 
@@ -487,6 +494,48 @@ generado: feature/login/docs/architecture/feature-login.md
 
 </details>
 
+### `module-check`: check the layer rules (optional)
+
+`module-check` reads the maps and reports, per module:
+
+- **Layer violations**: an edge between layers that `layers.forbidden` forbids, inside the module or
+  into another module of the project. A type of another module is recognized by codegraph or by that
+  module's map, which is read too.
+- **Forbidden library dependencies**: an edge from a layer to a library type listed for it in
+  `[check].forbidden_external`. By default the Domain layer may not use Android, serialization,
+  network or Hilt module types, which the layer rules alone cannot see.
+- **Forbidden annotations**: an annotation on a class, function or property whose name is listed for
+  its layer in `[check].forbidden_annotations` (by default Room, serialization and Hilt annotations in
+  Domain). Maps keep annotations by simple name, so this check matches names.
+- **Advisory edges**: possible violations backed only by codegraph with a confidence under 0.9. They
+  are listed apart, never fail the check and never decide a class's layer.
+- **Coverage**: maps older than the module's sources, maps whose module folder cannot be found,
+  Kotlin modules without a map, partial parses, types that look like the project's but that no map or
+  codegraph resolves, classes no layer rule classifies, and maps built without codegraph.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Every map is current and nothing is violated |
+| 1 | There are violations |
+| 2 | The check is incomplete (see Coverage; unclassified classes count only with `fail_on_unchecked`, unresolved project types unless `fail_on_unresolved = false`), or the configuration or a map is invalid |
+
+Exit 2 wins over 1, because violations read from a stale map may not be the current ones.
+
+```bash
+module-check . --generate          # builds the project's maps in a temporary folder, without codegraph, checks, discards them
+module-check .                     # checks the maps module-map already wrote, if they are current
+module-check . --generate --json   # the same result as JSON, for CI or an agent
+```
+
+Use it where it helps, and only there. Two common places:
+
+- **CI**: one step, `module-check . --generate`, that fails the job on exit code 1 or 2.
+- **A pre-commit hook**, if the team wants one: the same command in `.git/hooks/pre-commit` or in a
+  local `pre-commit` hook. `--generate` keeps it from writing `docs/architecture` on every commit.
+
+`--generate` does not run codegraph, because its index lives in the project, so calls are not
+checked in that mode. To include them, run `module-map .` (with codegraph) and then `module-check .`.
+
 The full list of options for each command is under [Options](#%EF%B8%8F-options).
 
 ---
@@ -586,6 +635,12 @@ api = "Other"                # a default (api -> Data) can be overridden too
 
 [layers.by_role]             # merged over the defaults: role -> layer
 mapper = "Data"
+
+[check]                      # read only by module-check
+forbidden_external = { Domain = ["android.", "androidx.", "kotlinx.serialization."] }  # replaces the default table
+forbidden_annotations = { Domain = ["Entity", "Dao", "Serializable", "Module"] }       # replaces the default table
+fail_on_unchecked = true     # exit 2 when a class has no layer
+fail_on_unresolved = false   # do not exit 2 for project types no map resolves
 ```
 
 Layers are `Presentation`, `Domain`, `Data`, `DI` and `Other`. An unknown key or layer stops the
@@ -701,6 +756,8 @@ the source and describes classes missing KDoc.
   for instance) are listed under the map's warnings instead of being dropped
 - **Not extracted** — navigation routes, UI state transitions, `Flow` collectors
 - **Two languages** — English (default) and Spanish
+- **`module-check` sees what the map sees**: the limits above apply to it too: calls only with
+  codegraph, no test sources, and types that only Kotlin inference reveals are not checked
 - **`index.html` needs a connection** — it draws the diagrams with marked and Mermaid from a CDN;
   offline it shows the Markdown as plain text
 

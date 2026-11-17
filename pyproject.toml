@@ -28,13 +28,14 @@ test = ["pytest>=8"]
 [project.scripts]
 module-map = "module_map:main"
 module-diagrams = "module_diagrams:main"
+module-check = "module_check:main"
 
 [project.urls]
 Repository = "https://github.com/pfranccino/android-module-map"
 
 [tool.setuptools]
 package-dir = { "" = "scripts" }
-py-modules = ["module_map", "module_diagrams"]
+py-modules = ["module_map", "module_diagrams", "module_check"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
