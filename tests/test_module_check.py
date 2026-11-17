@@ -377,3 +377,40 @@ def test_flat_maps_in_the_project_root_still_check_coverage(tmp_path):
     code, result = run(tmp_path)
     assert "feature/payments" in result["missing_maps"]
     assert code == 2
+
+
+def test_uncertain_edges_add_no_coverage_requirements(tmp_path):
+    # Both maps sit at a project root, so the check reads the :core:data map to classify the target.
+    target = "com.acme.core.data.SharedDto"
+    (tmp_path / "settings.gradle.kts").write_text('include(":feature:orders", ":core:data")\n', encoding="utf-8")
+    uncertain = {"from": DOMAIN, "to": target, "kind": "calls", "provenance": ["codegraph"],
+                 "details": [{"confidence": 0.1}]}
+    write_map(tmp_path, ":feature:orders", "feature/orders", [node(DOMAIN)],
+              [{"id": target, "name": "SharedDto", "origin": "project", "module": ":core:data"}], [uncertain])
+    write_map(tmp_path, ":core:data", "core/data", [node(target)], namespace="com.acme.core",
+              warnings=["partial parse, a declaration may be missing: core/data/src/main/kotlin/A.kt"])
+    code, result = run(tmp_path / "feature-orders.module-map.json", "--skip-freshness")
+    orders = result["maps"][0]
+    assert orders["violations"] == [] and len(orders["advisory"]) == 1
+    assert orders["supporting_maps"] == []
+    assert code == 0
+    trusted = dict(uncertain, provenance=["ast"], details=[])
+    write_map(tmp_path, ":feature:orders", "feature/orders", [node(DOMAIN)],
+              [{"id": target, "name": "SharedDto", "origin": "project", "module": ":core:data"}], [trusted])
+    code, result = run(tmp_path / "feature-orders.module-map.json", "--skip-freshness")
+    assert result["maps"][0]["supporting_maps"][0]["module"] == ":core:data"
+    assert code == 2
+
+
+def test_unreadable_configuration_exits_2_with_json(tmp_path, monkeypatch, capsys):
+    write_module(tmp_path, [node(DOMAIN)])
+    (tmp_path / ".module-map.toml").write_text("lang = \"en\"\n", encoding="utf-8")
+
+    def denied(*args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(module_diagrams, "read_config", denied)
+    code = module_check.main([str(tmp_path), "--json"])
+    assert code == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "incomplete" and output["errors"]
