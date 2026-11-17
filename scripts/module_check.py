@@ -102,6 +102,10 @@ MESSAGES = {
         "generate_needs_dir": "--generate needs a module or project folder, not {path}",
         "generate_failed": "module_map.py could not build the maps: {error}",
         "generated": "generated for this check",
+        "unclassified_targets": "types of other modules with no layer, so no layer rule checks them: {names}",
+        "supporting": "the map of {module}, used to classify types here, is not reliable ({state}). Refresh it.",
+        "limitation_constructor": "Note: maps do not keep annotations on primary-constructor properties, so those are not checked.",
+        "config_error": "{path}: the configuration cannot be read: {error}",
     },
     "es": {
         "status_pass": "Sin violaciones en {maps} mapas.",
@@ -132,6 +136,10 @@ MESSAGES = {
         "generate_needs_dir": "--generate necesita la carpeta de un módulo o del proyecto, no {path}",
         "generate_failed": "module_map.py no pudo generar los mapas: {error}",
         "generated": "generado para esta revisión",
+        "unclassified_targets": "tipos de otros módulos sin capa, así que ninguna regla de capas los revisa: {names}",
+        "supporting": "el mapa de {module}, que se usa para clasificar tipos aquí, no es confiable ({state}). Actualízalo.",
+        "limitation_constructor": "Nota: los mapas no guardan las anotaciones de las propiedades del constructor primario, así que esas no se revisan.",
+        "config_error": "{path}: no se puede leer la configuración: {error}",
     },
 }
 PARTIAL_PARSE_PREFIXES = tuple(
@@ -195,8 +203,9 @@ def build_map(data, rules, lang):
     return m
 
 
-def annotation_name(text):
-    return text.split("(", 1)[0].strip().lstrip("@").rsplit(".", 1)[-1]
+def annotation_names(annotations):
+    """Simple names, as module_map reads them: 'field:SerializedName("id")' -> {'SerializedName'}."""
+    return mapper.ann_names(annotations)
 
 
 def looks_generated(type_id):
@@ -207,13 +216,15 @@ def looks_generated(type_id):
 
 
 def find_violations(m, index, prefixes, options):
-    violations, advisory, unresolved = [], [], set()
+    violations, advisory, unresolved, used, other_targets = [], [], set(), set(), set()
     for edge in m.edges:
         source = edge["from"]
         if source not in m.nodes:
             continue
         source_layer = m.layers[source]
         target = edge["to"]
+        # An uncertain edge stays advisory: it never adds coverage requirements that could fail the check.
+        trusted = low_confidence(edge) is None
         record = None
         if target in m.nodes:
             if (source_layer, m.layers[target]) in m.rules.forbidden:
@@ -222,6 +233,10 @@ def find_violations(m, index, prefixes, options):
             external = m.externals[target]
             if target in index:
                 target_module, target_layer = index[target]
+                if trusted:
+                    used.add(target_module)
+                    if target_layer == "Other":
+                        other_targets.add(target)
                 if (source_layer, target_layer) in m.rules.forbidden:
                     record = {"rule": "layer", "scope": "project", "layers": [source_layer, target_layer],
                               "target_module": target_module}
@@ -234,7 +249,7 @@ def find_violations(m, index, prefixes, options):
                 prefix = next((p for p in options.forbidden_external.get(source_layer, []) if target.startswith(p)), None)
                 if prefix:
                     record = {"rule": "external", "scope": "library", "layer": source_layer, "prefix": prefix}
-                elif target.startswith(prefixes) and not looks_generated(target):
+                elif trusted and target.startswith(prefixes) and not looks_generated(target):
                     unresolved.add(target)
         if record is None:
             continue
@@ -256,14 +271,12 @@ def find_violations(m, index, prefixes, options):
             continue
         members = [node] + node.get("functions", []) + node.get("properties", [])
         for member in members:
-            for annotation in member.get("annotations", []):
-                name = annotation_name(annotation)
-                if name in forbidden:
-                    line = (member.get("lines") or node.get("lines") or [None])[0]
-                    where = node.get("file", "?") + (f":{line}" if line else "")
-                    violations.append({"rule": "annotation", "scope": "module", "layer": layer, "annotation": name,
-                                       "from": m.label(node_id), "from_id": node_id, "where": where})
-    return violations, advisory, sorted(unresolved)
+            for name in sorted(annotation_names(member.get("annotations", [])) & forbidden):
+                line = (member.get("lines") or node.get("lines") or [None])[0]
+                where = node.get("file", "?") + (f":{line}" if line else "")
+                violations.append({"rule": "annotation", "scope": "module", "layer": layer, "annotation": name,
+                                   "from": m.label(node_id), "from_id": node_id, "where": where})
+    return violations, advisory, sorted(unresolved), sorted(used), sorted(other_targets)
 
 
 def project_root(start):
@@ -304,9 +317,26 @@ def newest_source(folder, map_path):
     return newest, newest_time
 
 
-def kotlin_modules(path):
-    """Gradle modules under a folder that have Kotlin sources."""
-    return [d for d in mapper.inner_modules(path) if any((d / "src").rglob("*.kt"))]
+def kotlin_modules(path, root):
+    """Gradle modules under a folder for which module_map.py writes a map: production Kotlin sources, not tests."""
+    return [d for d in mapper.inner_modules(path) if next(mapper.kotlin_files(d, d, root), None) is not None]
+
+
+def map_problem(data):
+    """Why a JSON document is not a module map that module_map.py wrote, or None."""
+    if not isinstance(data, dict):
+        return "not a JSON object"
+    if not str(data.get("schema", "")).startswith("module-map/"):
+        return "no module-map schema"
+    module = data.get("module")
+    if not isinstance(module, dict) or not isinstance(module.get("path") or module.get("dir"), str):
+        return "no module path"
+    for key in ("nodes", "edges", "external_nodes"):
+        if not isinstance(data.get(key, []), list):  # module_map.py omits empty lists
+            return f"{key} is not a list"
+    if not isinstance(data.get("sources"), dict) or not data["sources"]:
+        return "no sources: nothing says which files were read"
+    return None
 
 
 def load(paths, lang):
@@ -314,16 +344,36 @@ def load(paths, lang):
     for path in paths:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict) or not isinstance(data.get("nodes", []), list):
-                raise ValueError("not a module map")
+            problem = map_problem(data)
+            if problem:
+                raise ValueError(problem)
             loaded.append((path, data))
         except (OSError, ValueError) as error:
             errors.append(t(lang, "map_error", path=path, error=error))
     return loaded, errors
 
 
+def health(path, m, data, root, skip_freshness, generated):
+    """Freshness and partial parses of one map."""
+    warnings = [w for w in data.get("warnings", []) if isinstance(w, str)]
+    result = {"freshness": "generated" if generated else "skipped" if skip_freshness else None, "stale_source": None,
+              "partial_parse": [w for w in warnings if w.startswith(PARTIAL_PARSE_PREFIXES)],
+              "warnings": [w for w in warnings if not w.startswith(PARTIAL_PARSE_PREFIXES)]}
+    if not generated and not skip_freshness:
+        folder = module_folder(path, m, root)
+        if folder is None:
+            result["freshness"] = "unknown"
+        else:
+            source, modified = newest_source(folder, path)
+            stale = source is not None and modified > path.stat().st_mtime + 1
+            result["freshness"] = "stale" if stale else "fresh"
+            result["stale_source"] = str(source) if stale else None
+    return result
+
+
 def check(selected, universe, rules, options, root, skip_freshness, generated, lang):
     maps = {id(data): build_map(data, rules, lang) for _, data in universe}
+    by_module = {maps[id(data)].path: (path, data) for path, data in universe}
     index = {}
     prefixes = set()
     for _, data in universe:
@@ -337,9 +387,18 @@ def check(selected, universe, rules, options, root, skip_freshness, generated, l
     results = []
     for path, data in selected:
         m = maps[id(data)]
-        violations, advisory, unresolved = find_violations(m, {k: v for k, v in index.items() if k not in m.nodes},
-                                                           prefixes, options)
-        warnings = [w for w in data.get("warnings", []) if isinstance(w, str)]
+        violations, advisory, unresolved, used, other_targets = find_violations(
+            m, {k: v for k, v in index.items() if k not in m.nodes}, prefixes, options)
+        state = health(path, m, data, root, skip_freshness, generated)
+        supporting = []
+        for module_path in used:
+            if module_path == m.path or module_path not in by_module:
+                continue
+            other_path, other_data = by_module[module_path]
+            other = health(other_path, maps[id(other_data)], other_data, root, skip_freshness, generated)
+            if other["freshness"] in ("stale", "unknown") or other["partial_parse"]:
+                supporting.append({"module": module_path, "freshness": other["freshness"],
+                                   "partial_parse": other["partial_parse"]})
         result = {
             "module": m.path,
             "module_dir": m.module.get("dir"),
@@ -348,40 +407,34 @@ def check(selected, universe, rules, options, root, skip_freshness, generated, l
             "advisory": advisory,
             "unchecked": sorted(m.label(i) for i in md.listed_classes(m) if m.layers[i] == "Other"),
             "unresolved": unresolved,
-            "partial_parse": [w for w in warnings if w.startswith(PARTIAL_PARSE_PREFIXES)],
-            "warnings": [w for w in warnings if not w.startswith(PARTIAL_PARSE_PREFIXES)],
+            "unclassified_targets": other_targets,
+            "supporting_maps": supporting,
             "codegraph": (data.get("sources", {}).get("codegraph") or {}).get("status"),
-            "freshness": "generated" if generated else "skipped" if skip_freshness else None,
-            "stale_source": None,
+            **state,
         }
-        if not generated and not skip_freshness:
-            folder = module_folder(path, m, root)
-            if folder is None:
-                result["freshness"] = "unknown"
-            else:
-                source, modified = newest_source(folder, path)
-                stale = source is not None and modified > path.stat().st_mtime + 1
-                result["freshness"] = "stale" if stale else "fresh"
-                result["stale_source"] = str(source) if stale else None
         results.append(result)
     return results
 
 
 def missing_modules(path, root, results):
     """Kotlin modules under a module or project folder that no checked map covers."""
-    if not path.is_dir() or root is None or any(path.glob("*.module-map.json")):
+    if not path.is_dir() or root is None:
         return []
+    gradle_folder = any((path / name).is_file() for name in (*mapper.BUILD_FILES, *md.SETTINGS_FILES))
+    if any(path.glob("*.module-map.json")) and not gradle_folder:
+        return []  # a folder of maps the caller chose: only those maps are in scope
     covered = {(root / r["module_dir"]).resolve() for r in results if r["module_dir"]}
     return sorted(str(d.resolve().relative_to(root.resolve())).replace("\\", "/")
-                  for d in kotlin_modules(path) if d.resolve() not in covered)
+                  for d in kotlin_modules(path, root) if d.resolve() not in covered)
 
 
 def summarize(results, missing, errors, options):
     violations = sum(len(r["violations"]) for r in results)
     incomplete = (not results or errors or missing
-                  or any(r["freshness"] in ("stale", "unknown") or r["partial_parse"] for r in results)
+                  or any(r["freshness"] in ("stale", "unknown") or r["partial_parse"] or r["supporting_maps"]
+                         for r in results)
                   or (options.fail_on_unresolved and any(r["unresolved"] for r in results))
-                  or (options.fail_on_unchecked and any(r["unchecked"] for r in results)))
+                  or (options.fail_on_unchecked and any(r["unchecked"] or r["unclassified_targets"] for r in results)))
     if incomplete:
         return "incomplete", 2, violations
     if violations:
@@ -418,10 +471,16 @@ def print_text(results, missing, errors, status, violations, lang):
             print("  " + t(lang, "unresolved", names=", ".join(r["unresolved"][:10])))
         if r["unchecked"]:
             print("  " + t(lang, "unchecked", count=len(r["unchecked"]), names=", ".join(r["unchecked"][:10])))
+        if r["unclassified_targets"]:
+            print("  " + t(lang, "unclassified_targets", names=", ".join(r["unclassified_targets"][:10])))
+        for s in r["supporting_maps"]:
+            print("  " + t(lang, "supporting", module=s["module"], state=s["freshness"] if s["freshness"] in ("stale", "unknown") else "partial parse"))
         if r["codegraph"] not in (None, "ok"):
             print("  " + t(lang, "no_codegraph"))
     if missing:
         print(t(lang, "missing_maps", modules=", ".join(missing)))
+    if results:
+        print(t(lang, "limitation_constructor"))
     if status == "incomplete":
         print(t(lang, "status_incomplete"))
     elif status == "violations":
@@ -474,8 +533,12 @@ def run(argv):
         print(md.tr(lang, "config_not_found", path=args.config), file=sys.stderr)
         return 2
     start = args.path.resolve()
-    config_path = args.config or md.find_config(start if start.is_dir() else start.parent)
-    config = md.read_config(config_path, lang) if config_path else {}
+    config_path = None
+    try:
+        config_path = args.config or md.find_config(start if start.is_dir() else start.parent)
+        config = md.read_config(config_path, lang) if config_path else {}
+    except OSError as error:
+        return report_error(args.json, t(lang, "config_error", path=config_path or args.path, error=error))
     lang = md.requested_lang(args.lang) or config.get("lang") or md.DEFAULT_LANG
     if lang not in md.LANGS:
         lang = md.DEFAULT_LANG
@@ -483,37 +546,51 @@ def run(argv):
     options = Options(config, config_path, lang)
     root = project_root(start if start.is_dir() else start.parent)
 
-    with tempfile.TemporaryDirectory(prefix="module-check-") as scratch:
+    if args.generate and not args.path.is_dir():
+        print(t(lang, "generate_needs_dir", path=args.path), file=sys.stderr)
+        return 2
+    results, errors = [], []
+    try:
         if args.generate:
-            if not args.path.is_dir():
-                print(t(lang, "generate_needs_dir", path=args.path), file=sys.stderr)
-                return 2
-            if not generate_maps(root or args.path, Path(scratch), config_path, lang):
-                return 2
-            universe, errors = load(md.find_maps(Path(scratch)), lang)
-            selected = [(p, d) for p, d in universe if under((d.get("module") or {}).get("dir"), args.path, root)]
+            with tempfile.TemporaryDirectory(prefix="module-check-") as scratch:
+                if not generate_maps(root or args.path, Path(scratch), config_path, lang):
+                    return 2
+                universe, errors = load(md.find_maps(Path(scratch)), lang)
+                selected = [(p, d) for p, d in universe if under(d["module"].get("dir"), args.path, root)]
+                results = check(selected, universe, rules, options, root, args.skip_freshness, True, lang)
         else:
             selected, errors = load(md.find_maps(args.path) if args.path.exists() else [], lang)
             others, more_errors = load(md.find_maps(root) if root else [], lang)
             chosen = {p.resolve() for p, _ in selected}
             universe = selected + [(p, d) for p, d in others if p.resolve() not in chosen]
             errors += [e for e in more_errors if e not in errors]
-        try:
-            results = check(selected, universe, rules, options, root, args.skip_freshness, args.generate, lang)
-        except (KeyError, TypeError, AttributeError, ValueError) as error:
-            errors.append(t(lang, "map_error", path=args.path, error=f"{type(error).__name__}: {error}"))
-            results = []
-    missing = missing_modules(args.path, root, results)
+            results = check(selected, universe, rules, options, root, args.skip_freshness, False, lang)
+        missing = missing_modules(args.path, root, results)
+    except (OSError, KeyError, TypeError, AttributeError, ValueError) as error:
+        errors.append(t(lang, "map_error", path=args.path, error=f"{type(error).__name__}: {error}"))
+        results, missing = [], []
     status, code, violations = summarize(results, missing, errors, options)
     if args.json:
         print(json.dumps({"schema_version": SCHEMA_VERSION, "status": status, "exit_code": code,
-                          "violations": violations, "maps": results, "missing_maps": missing, "errors": errors},
+                          "violations": violations, "maps": results, "missing_maps": missing, "errors": errors,
+                          "limitations": [t("en", "limitation_constructor")]},
                          indent=2, ensure_ascii=False))
     else:
         if not results and not errors:
             print(t(lang, "no_maps", path=args.path))
         print_text(results, missing, errors, status, violations, lang)
     return code
+
+
+def report_error(as_json, message):
+    """An error before any map was read: exit 2, as JSON when --json was asked."""
+    if as_json:
+        print(json.dumps({"schema_version": SCHEMA_VERSION, "status": "incomplete", "exit_code": 2, "violations": 0,
+                          "maps": [], "missing_maps": [], "errors": [message], "limitations": []},
+                         indent=2, ensure_ascii=False))
+    else:
+        print(message, file=sys.stderr)
+    return 2
 
 
 def main(argv=None):

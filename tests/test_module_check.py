@@ -27,7 +27,7 @@ def write_module(root, nodes, externals=(), edges=(), codegraph="ok"):
     (root / "settings.gradle.kts").write_text('include(":feature:orders")\n', encoding="utf-8")
     docs = module / "docs" / "architecture"
     docs.mkdir(parents=True)
-    data = {"module": {"path": ":feature:orders", "dir": "feature/orders"}, "nodes": list(nodes),
+    data = {"schema": "module-map/1", "module": {"path": ":feature:orders", "dir": "feature/orders"}, "nodes": list(nodes),
             "external_nodes": list(externals), "edges": list(edges),
             "sources": {"ast": {"files": 1}, "codegraph": {"status": codegraph}}}
     map_path = docs / "feature-orders.module-map.json"
@@ -203,7 +203,7 @@ def test_forbidden_annotations_in_domain(tmp_path):
 
 def write_map(folder, module_path, module_dir, nodes, externals=(), edges=(), namespace="com.acme.orders", **extra):
     folder.mkdir(parents=True, exist_ok=True)
-    data = {"module": {"path": module_path, "dir": module_dir, "namespace": namespace}, "nodes": nodes,
+    data = {"schema": "module-map/1", "module": {"path": module_path, "dir": module_dir, "namespace": namespace}, "nodes": nodes,
             "external_nodes": list(externals), "edges": list(edges), "sources": {"codegraph": {"status": "skipped"}}, **extra}
     path = folder / (module_path.strip(":").replace(":", "-") + ".module-map.json")
     path.write_text(json.dumps(data), encoding="utf-8")
@@ -293,3 +293,124 @@ def test_low_confidence_edges_do_not_decide_layers(tmp_path):
     code, result = run(tmp_path)
     assert result["maps"][0]["violations"] == []
     assert "Helper" in result["maps"][0]["unchecked"]
+
+
+def test_use_site_targets_are_read_like_module_map(tmp_path):
+    prop = node(DOMAIN, properties=[{"name": "id", "annotations": ['field:SerializedName("id")']}])
+    write_module(tmp_path, [prop])
+    code, result = run(tmp_path)
+    assert code == 1
+    assert result["maps"][0]["violations"][0]["annotation"] == "SerializedName"
+    assert result["limitations"]
+
+
+def test_stale_supporting_map_makes_the_check_incomplete(tmp_path):
+    target = "com.acme.core.data.SharedDto"
+    maps = tmp_path / "maps"
+    write_map(maps, ":feature:orders", "feature/orders", [node(DOMAIN)],
+              [{"id": target, "name": "SharedDto", "origin": "library"}], [edge(DOMAIN, target)])
+    write_map(maps, ":core:data", "core/data", [node(target)], namespace="com.acme.core",
+              warnings=["partial parse, a declaration may be missing: core/data/src/main/kotlin/A.kt"])
+    code, result = run(maps, "--skip-freshness")
+    orders = next(r for r in result["maps"] if r["module"] == ":feature:orders")
+    assert orders["supporting_maps"] and orders["supporting_maps"][0]["module"] == ":core:data"
+    assert code == 2
+
+
+def test_target_without_layer_in_a_supporting_map_is_reported(tmp_path):
+    target = "com.acme.core.Shared"
+    maps = tmp_path / "maps"
+    write_map(maps, ":feature:orders", "feature/orders", [node(DOMAIN)],
+              [{"id": target, "name": "Shared", "origin": "library"}], [edge(DOMAIN, target)])
+    write_map(maps, ":core", "core", [node(target)], namespace="com.acme.core")
+    code, result = run(maps, "--skip-freshness")
+    assert next(r for r in result["maps"] if r["module"] == ":feature:orders")["unclassified_targets"] == [target]
+    (maps / ".module-map.toml").write_text("[check]\nfail_on_unchecked = true\n", encoding="utf-8")
+    assert run(maps, "--skip-freshness")[0] == 2
+
+
+def test_test_only_modules_need_no_map(tmp_path):
+    write_module(tmp_path, [node(DOMAIN)])
+    tests_only = tmp_path / "feature" / "fixtures"
+    (tests_only / "src" / "test" / "kotlin").mkdir(parents=True)
+    (tests_only / "src" / "test" / "kotlin" / "OnlyTest.kt").write_text("package x\n", encoding="utf-8")
+    (tests_only / "build.gradle.kts").write_text("plugins {}\n", encoding="utf-8")
+    code, result = run(tmp_path)
+    assert result["missing_maps"] == []
+    assert code == 0
+
+
+@pytest.mark.parametrize("content", ["{}", '{"module": {"dir": "feature/orders"}}',
+                                     '{"schema": "module-map/1", "module": {"path": ":x"}, "nodes": []}'])
+def test_documents_that_are_not_maps_are_errors(tmp_path, content):
+    maps = tmp_path / "maps"
+    maps.mkdir()
+    (maps / "x.module-map.json").write_text(content, encoding="utf-8")
+    code, result = run(maps, "--skip-freshness")
+    assert code == 2
+    assert result["errors"]
+
+
+def test_filesystem_errors_exit_2_with_json(tmp_path, monkeypatch):
+    write_module(tmp_path, [node(DOMAIN)])
+
+    def broken(*args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(module_check, "newest_source", broken)
+    monkeypatch.setattr(sys, "argv", ["module_check.py"])
+    code = module_check.main([str(tmp_path), "--json"])
+    assert code == 2
+
+
+def test_flat_maps_in_the_project_root_still_check_coverage(tmp_path):
+    write_module(tmp_path, [node(DOMAIN)])
+    other = tmp_path / "feature" / "payments"
+    (other / "src" / "main" / "kotlin").mkdir(parents=True)
+    (other / "src" / "main" / "kotlin" / "Pay.kt").write_text("package x\n", encoding="utf-8")
+    (other / "build.gradle.kts").write_text("plugins {}\n", encoding="utf-8")
+    source_map = tmp_path / "feature" / "orders" / "docs" / "architecture" / "feature-orders.module-map.json"
+    flat = tmp_path / "feature-orders.module-map.json"
+    flat.write_text(source_map.read_text(encoding="utf-8"), encoding="utf-8")
+    later = source_map.stat().st_mtime
+    os.utime(flat, (later, later))
+    code, result = run(tmp_path)
+    assert "feature/payments" in result["missing_maps"]
+    assert code == 2
+
+
+def test_uncertain_edges_add_no_coverage_requirements(tmp_path):
+    # Both maps sit at a project root, so the check reads the :core:data map to classify the target.
+    target = "com.acme.core.data.SharedDto"
+    (tmp_path / "settings.gradle.kts").write_text('include(":feature:orders", ":core:data")\n', encoding="utf-8")
+    uncertain = {"from": DOMAIN, "to": target, "kind": "calls", "provenance": ["codegraph"],
+                 "details": [{"confidence": 0.1}]}
+    write_map(tmp_path, ":feature:orders", "feature/orders", [node(DOMAIN)],
+              [{"id": target, "name": "SharedDto", "origin": "project", "module": ":core:data"}], [uncertain])
+    write_map(tmp_path, ":core:data", "core/data", [node(target)], namespace="com.acme.core",
+              warnings=["partial parse, a declaration may be missing: core/data/src/main/kotlin/A.kt"])
+    code, result = run(tmp_path / "feature-orders.module-map.json", "--skip-freshness")
+    orders = result["maps"][0]
+    assert orders["violations"] == [] and len(orders["advisory"]) == 1
+    assert orders["supporting_maps"] == []
+    assert code == 0
+    trusted = dict(uncertain, provenance=["ast"], details=[])
+    write_map(tmp_path, ":feature:orders", "feature/orders", [node(DOMAIN)],
+              [{"id": target, "name": "SharedDto", "origin": "project", "module": ":core:data"}], [trusted])
+    code, result = run(tmp_path / "feature-orders.module-map.json", "--skip-freshness")
+    assert result["maps"][0]["supporting_maps"][0]["module"] == ":core:data"
+    assert code == 2
+
+
+def test_unreadable_configuration_exits_2_with_json(tmp_path, monkeypatch, capsys):
+    write_module(tmp_path, [node(DOMAIN)])
+    (tmp_path / ".module-map.toml").write_text("lang = \"en\"\n", encoding="utf-8")
+
+    def denied(*args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(module_diagrams, "read_config", denied)
+    code = module_check.main([str(tmp_path), "--json"])
+    assert code == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "incomplete" and output["errors"]
