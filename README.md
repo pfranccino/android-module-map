@@ -8,7 +8,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Two scripts. No Gradle build. No AI model. Same input → same output, every time.
+Two scripts, plus an optional layer check. No Gradle build. No AI model. Same input → same output, every time.
 
 [Quick Start](#-quick-start) · [Commands](#-commands) · [Features](#-features) · [Configuration](#%EF%B8%8F-configuration) · [How It Works](#-how-it-works) · [Examples](examples/)
 
@@ -23,6 +23,7 @@ diagrams by hand. **This tool reads the code and draws them for you.**
 ```
 module_map.py        source code  →  .module-map.json
 module_diagrams.py   map JSON     →  .md  (Mermaid diagrams + analysis)
+module_check.py      map JSON     →  exit code 0, 1 or 2  (optional layer check)
 ```
 
 <details>
@@ -95,6 +96,7 @@ graph TD
 | 🗺️ | **Scales to big modules** | Above 40 drawn nodes the layer diagram switches to one box per package |
 | 🌐 | **English or Spanish** | English by default, `--lang es` for Spanish documents, messages and map legend |
 | ⚙️ | **Configurable rules** | Layer names and forbidden dependencies live in `.module-map.toml`, not in the code |
+| ✅ | **Layer check (optional)** | `module-check` exits 0, 1 or 2 for CI, a pre-commit hook or a coding agent, and checks forbidden layer pairs, library packages and annotations. With `--generate` it writes nothing into the project |
 | ♻️ | **Deterministic** | Same code → same output. Works in CI, code review, or as a Claude Code skill |
 
 ---
@@ -615,6 +617,25 @@ Maps are meant to be committed: they hold no absolute paths, and with `--no-time
 
 </details>
 
+<details>
+<summary><b>module-check</b> / <code>module_check.py</code> <code>&lt;path&gt;</code> (optional)</summary>
+
+`<path>` is a module, a directory of modules, a directory of maps, or one map JSON.
+
+| Option | Meaning |
+|---|---|
+| `--generate` | Build the project's maps in a temporary folder, without codegraph, check them and discard them. Nothing is written into the project |
+| `--json` | Print the result as JSON, for CI or an agent |
+| `--skip-freshness` | Do not compare the maps with the source files. Use it only when the maps were just generated |
+| `--lang es\|en` | Language of the messages |
+| `--config` | Path to a `.module-map.toml` (looked up automatically otherwise) |
+
+Exit codes: 0 when the check passes, 1 when there are violations, 2 when the check is incomplete or
+a map or the configuration cannot be read. See
+[`module-check`: check the layer rules](#module-check-check-the-layer-rules-optional).
+
+</details>
+
 ---
 
 ## 🛠️ Configuration
@@ -665,6 +686,7 @@ graph LR
     B["📊 codegraph<br/><i>.codegraph/codegraph.db</i>"] --> D
     C["📝 Gradle + Manifest<br/><i>build.gradle.kts, libs.versions.toml</i>"] --> D
     D --> E["📄 Mermaid diagrams<br/><i>module_diagrams.py</i>"]
+    D -.-> F["✅ Layer check, optional<br/><i>module_check.py</i>"]
 ```
 
 | Source | What it provides |
@@ -728,7 +750,8 @@ python -m venv .venv
 .venv/bin/pytest                          # Windows: .venv\Scripts\pytest
 ```
 
-The suite covers the AST map, the codegraph edge validation (against a hand-built index), version
+The suite covers the AST map, the codegraph edge validation (against a hand-built index), the
+optional layer check and its exit codes, version
 catalogs, configuration, both languages, the CLI end to end, and checks that the committed
 [`examples/`](examples/) match what the script generates. CI runs it on Linux, macOS and Windows
 with Python 3.10 and 3.13, plus a run of the scripts with nothing installed.
@@ -744,7 +767,7 @@ into your project's skills directory:
 git clone https://github.com/pfranccino/android-module-map.git .claude/skills/module-map
 ```
 
-The skill runs both scripts, then goes further: it verifies edges listed under "review" against
+The skill runs both scripts, and the optional layer check when you ask for one, then goes further: it verifies edges listed under "review" against
 the source and describes classes missing KDoc.
 
 ---
