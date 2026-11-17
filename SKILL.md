@@ -113,6 +113,22 @@ behaviour, propose the change to that file and wait for approval, so the result 
 reproducible. Propose a change to `scripts/module_diagrams.py` only for what the file cannot
 express, such as which nodes are drawn.
 
+## Checking the layer rules (optional)
+
+`scripts/module_check.py` checks the maps against the layer rules and exits 0 (pass), 1 (violations)
+or 2 (incomplete: no maps, a stale map, a module without a map, a partial parse, unresolved project types, or unclassified classes when `fail_on_unchecked` is set). Run it
+only when the user asks for a check, or for help setting one up in CI or a pre-commit hook; never add
+it to a hook on your own. With `--generate` it builds the project's maps in a temporary folder, without codegraph, and writes
+nothing into the project, which is what a check usually wants:
+
+```
+python3 <this-skill-dir>/scripts/module_check.py <directory> --generate --json
+```
+
+Report each violation with its file and line, list advisory edges apart, and say when the check was
+incomplete and why. The rules come from `layers.forbidden`, `[check].forbidden_external` and
+`[check].forbidden_annotations` in `.module-map.toml`.
+
 ## Finish
 
 Tell the user where the three files are (map, document, review), how many nodes and edges the

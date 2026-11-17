@@ -441,7 +441,7 @@ def rules_from_config(config, path, lang):
         sys.exit(tr(lang, "config_invalid_value", file=path, key=key, value=value, hint=hint))
 
     for key in config:
-        if key not in ("lang", "layers"):
+        if key not in ("lang", "layers", "check"):  # [check] is read by module_check.py
             sys.exit(tr(lang, "config_unknown", file=path, key=key))
     layers = config.get("layers", {})
     layer_hint = tr(lang, "hint_layers", layers=", ".join(LAYERS))
